@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>胡老师视频剪辑</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">胡</div>
+          <div>
+            <h1>胡老师视频剪辑</h1>
+            <p>蝉镜生成 · 模型审字幕 · 自动成片</p>
+          </div>
+        </div>
+        <nav class="nav">
+          <button class="nav-item active" data-section="run">任务</button>
+          <button class="nav-item" data-section="settings">设置</button>
+          <button class="nav-item" data-section="style">风格</button>
+          <button class="nav-item" data-section="logs">日志</button>
+        </nav>
+        <div class="status-card">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusText">空闲</span>
+        </div>
+      </aside>
+
+      <section class="content">
+        <section id="section-run" class="panel active">
+          <div class="toolbar">
+            <div>
+              <h2>批量任务</h2>
+              <p class="muted">导入 JSON 后按顺序生成 raw，再按当前配置剪辑输出。</p>
+            </div>
+            <div class="toolbar-actions">
+              <button id="btnLoadJson" class="button secondary">选择 JSON</button>
+              <button id="btnRun" class="button primary">开始出片</button>
+              <button id="btnCancel" class="button danger" disabled>停止</button>
+            </div>
+          </div>
+
+          <div class="grid two">
+            <div class="field">
+              <label>JSON 文件</label>
+              <div class="path-row">
+                <input id="inputJsonPath" readonly placeholder="请选择任务 JSON" />
+              </div>
+            </div>
+            <div class="field">
+              <label>输出目录</label>
+              <div class="path-row">
+                <input id="outputDir" placeholder="输出目录" />
+                <button class="icon-button" data-pick-dir="outputDir" title="选择目录">...</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="summary-strip">
+            <div><strong id="summaryName">未载入</strong><span>任务名</span></div>
+            <div><strong id="summaryCount">0</strong><span>选中/总数</span></div>
+            <div><strong id="summaryMode">标题+BGM</strong><span>剪辑配置</span></div>
+            <div><strong>必跑</strong><span>模型字幕审查</span></div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th class="select-col"><input id="selectAllRows" type="checkbox" checked /></th>
+                  <th>#</th>
+                  <th>编号</th>
+                  <th>主题</th>
+                  <th>标题</th>
+                  <th>内容</th>
+                  <th>字数</th>
+                  <th class="time-cell">时间</th>
+                </tr>
+              </thead>
+              <tbody id="itemsTable">
+                <tr><td colspan="8" class="empty">还没有导入任务</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="section-settings" class="panel">
+          <div class="toolbar">
+            <div>
+              <h2>设置</h2>
+              <p class="muted">密钥只保存在本机应用配置里。字幕换行审查需要 OpenAI 兼容接口。</p>
+            </div>
+            <button id="btnSaveSettings" class="button primary">保存设置</button>
+          </div>
+
+          <div class="settings-grid">
+            <div class="settings-card">
+              <h3>路径</h3>
+              <div class="field">
+                <label>素材包目录</label>
+                <div class="path-row">
+                  <input id="bundlePath" />
+                  <button class="icon-button" data-pick-dir="bundlePath" title="选择目录">...</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>Python</label>
+                <input id="pythonPath" placeholder="python" />
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <h3>蝉镜</h3>
+              <div class="field">
+                <label>API 地址</label>
+                <input id="chanjingBaseUrl" />
+              </div>
+              <div class="grid two compact">
+                <div class="field">
+                  <label>AK / App ID</label>
+                  <input id="chanjingAppId" autocomplete="off" />
+                </div>
+                <div class="field">
+                  <label>SK / Secret Key</label>
+                  <input id="chanjingSecretKey" type="password" autocomplete="off" />
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <h3>模型审查</h3>
+              <div class="field">
+                <label>接口 URL</label>
+                <input id="modelBaseUrl" placeholder="https://api.openai.com/v1" />
+              </div>
+              <div class="grid two compact">
+                <div class="field">
+                  <label>API Key</label>
+                  <input id="modelApiKey" type="password" autocomplete="off" />
+                </div>
+                <div class="field">
+                  <label>模型名</label>
+                  <input id="modelName" placeholder="gpt-4.1-mini" />
+                </div>
+              </div>
+              <p class="hint">每条文案都会把字幕分页交给模型检查，返回合法分页后才继续生成视频。</p>
+            </div>
+
+            <div class="settings-card">
+              <h3>批量</h3>
+              <div class="grid three compact">
+                <div class="field">
+                  <label>最多处理条数</label>
+                  <input id="maxItems" type="number" min="0" />
+                </div>
+                <div class="field">
+                  <label>轮询秒数</label>
+                  <input id="pollIntervalSeconds" type="number" min="5" />
+                </div>
+                <div class="field">
+                  <label>超时分钟</label>
+                  <input id="timeoutMinutes" type="number" min="5" />
+                </div>
+              </div>
+              <p class="hint">最多处理条数填 0 表示处理 JSON 里的全部 items。</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="section-style" class="panel">
+          <div class="toolbar">
+            <div>
+              <h2>风格</h2>
+              <p class="muted">统一管理标题、字幕、声明的字体样式，以及视频里的 BGM 和后续音效文件。</p>
+            </div>
+            <button id="btnSaveStyleSettings" class="button primary">保存风格</button>
+          </div>
+
+          <div class="settings-grid">
+            <div class="settings-card">
+              <h3>字体</h3>
+              <div class="field">
+                <label>标题字体文件</label>
+                <div class="path-row">
+                  <input id="titleFontPath" />
+                  <button class="icon-button" data-pick-font="titleFontPath" title="选择字体">...</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>字幕字体文件</label>
+                <div class="path-row">
+                  <input id="captionFontPath" />
+                  <button class="icon-button" data-pick-font="captionFontPath" title="选择字体">...</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <h3>音效</h3>
+              <div class="field">
+                <label>BGM 文件</label>
+                <div class="path-row">
+                  <input id="bgmFile" />
+                  <button class="icon-button" data-pick-audio="bgmFile" title="选择音频">...</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <h3>文字样式</h3>
+              <div class="style-grid">
+                <span class="style-head">对象</span>
+                <span class="style-head">字体颜色</span>
+                <span class="style-head">描边颜色</span>
+                <span class="style-head">描边大小</span>
+
+                <label>标题上</label>
+                <input id="titleTopColor" type="color" />
+                <input id="titleTopOutlineColor" type="color" />
+                <input id="titleTopOutlineSize" type="number" min="0" max="80" />
+
+                <label>标题中</label>
+                <input id="titleMiddleColor" type="color" />
+                <input id="titleMiddleOutlineColor" type="color" />
+                <input id="titleMiddleOutlineSize" type="number" min="0" max="80" />
+
+                <label>标题下</label>
+                <input id="titleBottomColor" type="color" />
+                <input id="titleBottomOutlineColor" type="color" />
+                <input id="titleBottomOutlineSize" type="number" min="0" max="80" />
+
+                <label>字幕</label>
+                <input id="captionColor" type="color" />
+                <input id="captionOutlineColor" type="color" />
+                <input id="captionOutlineSize" type="number" min="0" max="80" />
+
+                <label>底部声明</label>
+                <input id="disclaimerColor" type="color" />
+                <input id="disclaimerOutlineColor" type="color" />
+                <input id="disclaimerOutlineSize" type="number" min="0" max="80" />
+              </div>
+              <div class="field">
+                <label>底部声明不透明度（%）</label>
+                <input id="disclaimerOpacityPercent" type="number" min="0" max="100" />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="section-logs" class="panel">
+          <div class="toolbar">
+            <div>
+              <h2>日志</h2>
+              <p class="muted">运行中会显示蝉镜状态、模型字幕审查结果和输出路径。</p>
+            </div>
+            <button id="btnClearLog" class="button secondary">清空</button>
+          </div>
+          <pre id="logBox" class="log-box"></pre>
+        </section>
+      </section>
+    </main>
+
+    <div id="contentModal" class="modal-backdrop" hidden>
+      <div class="modal">
+        <div class="modal-header">
+          <h3 id="contentModalTitle">编辑内容</h3>
+          <button id="btnCloseContentModal" class="icon-button" type="button" title="关闭">×</button>
+        </div>
+        <textarea id="contentEditor" class="content-editor" rows="13"></textarea>
+        <div class="modal-meta">
+          <span id="contentCharCount">0 字</span>
+          <span id="contentLockedHint"></span>
+        </div>
+        <div class="modal-actions">
+          <button id="btnCancelContentEdit" class="button secondary" type="button">取消</button>
+          <button id="btnSaveContentEdit" class="button primary" type="button">保存内容</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

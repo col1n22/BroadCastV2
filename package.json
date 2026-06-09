@@ -1,0 +1,39 @@
+{
+  "name": "hu-teacher-video-app",
+  "version": "0.1.0",
+  "description": "胡老师口播视频自动剪辑桌面端",
+  "main": "main.js",
+  "author": "Hu Teacher Pipeline",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "local.hu-teacher.video",
+    "productName": "胡老师视频剪辑",
+    "asar": false,
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "python/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        "portable"
+      ]
+    }
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  }
+}
