@@ -3,21 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>胡老师视频剪辑</title>
+    <title>医生视频剪辑</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="app-shell">
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-mark">胡</div>
+          <div class="brand-mark">医</div>
           <div>
-            <h1>胡老师视频剪辑</h1>
+            <h1>医生视频剪辑</h1>
             <p>蝉镜生成 · 模型审字幕 · 自动成片</p>
           </div>
         </div>
         <nav class="nav">
           <button class="nav-item active" data-section="run">任务</button>
+          <button class="nav-item" data-section="preview">预览</button>
           <button class="nav-item" data-section="settings">设置</button>
           <button class="nav-item" data-section="style">风格</button>
           <button class="nav-item" data-section="logs">日志</button>
@@ -61,7 +62,26 @@
           <div class="summary-strip">
             <div><strong id="summaryName">未载入</strong><span>任务名</span></div>
             <div><strong id="summaryCount">0</strong><span>选中/总数</span></div>
-            <div><strong id="summaryMode">标题+BGM</strong><span>剪辑配置</span></div>
+            <div class="clip-config-card">
+              <input id="clipPreset" type="hidden" value="title_bgm" />
+              <div id="clipConfigDropdown" class="clip-multiselect">
+                <button id="clipConfigButton" class="summary-select clip-config-button" type="button" aria-expanded="false">
+                  <span id="clipConfigText">标题+字幕+BGM</span>
+                  <span class="clip-config-caret">▾</span>
+                </button>
+                <div id="clipConfigMenu" class="clip-config-menu" hidden>
+                  <label class="required-clip"><input id="clipTitle" type="checkbox" checked disabled />标题</label>
+                  <label class="required-clip"><input id="clipCaption" type="checkbox" checked disabled />字幕</label>
+                  <label class="required-clip"><input id="clipBgm" type="checkbox" checked disabled />BGM</label>
+                  <label><input id="clipTitleMotion" type="checkbox" />标题动画</label>
+                  <label><input id="clipIntro" type="checkbox" />身份背书</label>
+                  <label><input id="clipPatent" type="checkbox" />专利</label>
+                  <label><input id="clipPip" type="checkbox" />画中画</label>
+                  <label><input id="clipTextEffects" type="checkbox" />花字</label>
+                </div>
+              </div>
+              <span>剪辑配置</span>
+            </div>
             <div><strong>必跑</strong><span>模型字幕审查</span></div>
           </div>
 
@@ -84,6 +104,105 @@
               </tbody>
             </table>
           </div>
+        </section>
+
+        <section id="section-preview" class="panel">
+          <div class="toolbar">
+            <div>
+              <h2>预览</h2>
+              <p class="muted">生成标题和字幕预览，拖动或拉伸画面里的文字区域后保存。</p>
+            </div>
+            <div class="toolbar-actions">
+              <button id="btnPreviewTitle" class="button secondary" type="button">标题生成</button>
+              <button id="btnPreviewCaption" class="button secondary" type="button">字幕生成</button>
+              <button id="btnResetPreviewLayout" class="button secondary" type="button">恢复默认布局</button>
+              <button id="btnSavePreviewSettings" class="button primary" type="button">保存预览</button>
+            </div>
+          </div>
+
+          <div class="preview-layout">
+            <div class="preview-stage-card">
+              <div id="previewFrame" class="preview-frame">
+                <div class="preview-video-bg"></div>
+                <div id="previewTitleBox" class="preview-box preview-title-box" data-preview-box="title">
+                  <div class="preview-title-line preview-title-top">糖尿病花钱多</div>
+                  <div class="preview-title-line preview-title-middle">药也越来越多</div>
+                  <div class="preview-title-line preview-title-bottom">先看原因</div>
+                  <span class="preview-resize-handle"></span>
+                </div>
+                <div id="previewCaptionBox" class="preview-box preview-caption-box" data-preview-box="caption">
+                  <div id="previewCaptionText">很多糖友嘴上不说<br />其实最担心的是花钱多</div>
+                  <span class="preview-resize-handle"></span>
+                </div>
+                <div id="previewTextEffectBox" class="preview-box preview-text-effect-box" data-preview-box="textEffect">
+                  <div id="previewTextEffectText">花字限制</div>
+                  <span class="preview-resize-handle"></span>
+                </div>
+                <div id="previewPipBox" class="preview-box preview-pip-box" data-preview-box="pip">
+                  <span>画中画</span>
+                  <span class="preview-resize-handle preview-pip-resize-handle"></span>
+                </div>
+                <div id="previewDisclaimerBox" class="preview-box preview-disclaimer-box" data-preview-box="disclaimer">
+                  <div id="previewDisclaimerText">所有内容来自官方信息公示<br />仅做咨询分享无不良引导<br />如有不适请及时就医</div>
+                  <span class="preview-resize-handle"></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-card preview-controls">
+              <h3>位置尺寸</h3>
+              <div class="field">
+                <label>当前对象</label>
+                <select id="previewObject">
+                  <option value="title">标题</option>
+                  <option value="caption">字幕</option>
+                  <option value="textEffect">花字限制</option>
+                  <option value="pip">画中画</option>
+                  <option value="disclaimer">底部声明</option>
+                </select>
+              </div>
+              <div class="grid two compact">
+                <div class="field">
+                  <label>X</label>
+                  <input id="previewCurrentX" type="number" min="0" max="1080" />
+                </div>
+                <div class="field">
+                  <label>Y</label>
+                  <input id="previewCurrentY" type="number" min="0" max="1920" />
+                </div>
+                <div class="field">
+                  <label>宽</label>
+                  <input id="previewCurrentW" type="number" min="80" max="1080" />
+                </div>
+                <div class="field">
+                  <label>高</label>
+                  <input id="previewCurrentH" type="number" min="40" max="1920" />
+                </div>
+              </div>
+              <p class="hint">拖动改变位置，拖右下角改变大小；画中画只调高度，宽度按 16:9 自动计算。</p>
+            </div>
+          </div>
+
+          <input id="previewTitleX" type="hidden" />
+          <input id="previewTitleY" type="hidden" />
+          <input id="previewTitleW" type="hidden" />
+          <input id="previewTitleH" type="hidden" />
+          <input id="previewCaptionX" type="hidden" />
+          <input id="previewCaptionY" type="hidden" />
+          <input id="previewCaptionW" type="hidden" />
+          <input id="previewCaptionH" type="hidden" />
+          <input id="previewTextEffectX" type="hidden" />
+          <input id="previewTextEffectY" type="hidden" />
+          <input id="previewTextEffectW" type="hidden" />
+          <input id="previewTextEffectH" type="hidden" />
+          <input id="previewDisclaimerX" type="hidden" />
+          <input id="previewDisclaimerY" type="hidden" />
+          <input id="previewDisclaimerW" type="hidden" />
+          <input id="previewDisclaimerH" type="hidden" />
+          <input id="previewPipX" type="hidden" />
+          <input id="previewPipY" type="hidden" />
+          <input id="previewPipW" type="hidden" />
+          <input id="previewPipH" type="hidden" />
         </section>
 
         <section id="section-settings" class="panel">
@@ -195,6 +314,20 @@
                   <button class="icon-button" data-pick-font="captionFontPath" title="选择字体">...</button>
                 </div>
               </div>
+              <div class="field">
+                <label>花字字体文件</label>
+                <div class="path-row">
+                  <input id="textEffectFontPath" />
+                  <button class="icon-button" data-pick-font="textEffectFontPath" title="选择字体">...</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>底部声明字体文件</label>
+                <div class="path-row">
+                  <input id="disclaimerFontPath" />
+                  <button class="icon-button" data-pick-font="disclaimerFontPath" title="选择字体">...</button>
+                </div>
+              </div>
             </div>
 
             <div class="settings-card">
@@ -206,6 +339,153 @@
                   <button class="icon-button" data-pick-audio="bgmFile" title="选择音频">...</button>
                 </div>
               </div>
+              <div class="field">
+                <label>BGM 音量（%）</label>
+                <input id="bgmVolumePercent" type="number" min="0" max="200" step="1" />
+              </div>
+              <div class="field">
+                <label>BGM 开始方式</label>
+                <select id="bgmStartMode">
+                  <option value="after_title">标题结束后 BGM</option>
+                  <option value="full">全片 BGM</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>音效文件夹</label>
+                <div class="path-row">
+                  <input id="sfxFolder" />
+                  <button class="icon-button" data-pick-dir="sfxFolder" title="选择目录">...</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>指定音效文件</label>
+                <div class="path-row with-toggle">
+                  <input id="sfxFile" />
+                  <button class="icon-button" data-pick-audio="sfxFile" title="选择音频">...</button>
+                  <label class="inline-check"><input id="useSfxFile" type="checkbox" /><span>使用指定</span></label>
+                </div>
+              </div>
+              <div class="field">
+                <label>花字音效音量（%）</label>
+                <input id="sfxVolumePercent" type="number" min="0" max="200" step="1" />
+              </div>
+              <div class="field">
+                <label class="inline-check standalone"><input id="keywordSfxEnabled" type="checkbox" /><span>关键词触发音效</span></label>
+                <textarea id="keywordSfxKeywords" class="keyword-textarea" rows="4" placeholder="每行一个关键词，也可以用逗号、顿号分隔"></textarea>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <h3>视频内容</h3>
+              <div class="field">
+                <label>开头视频文件夹</label>
+                <div class="path-row">
+                  <input id="openingVideoFolder" />
+                  <button class="icon-button" data-pick-dir="openingVideoFolder" title="选择目录">...</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>指定开头视频文件</label>
+                <div class="path-row with-toggle">
+                  <input id="openingVideoFile" />
+                  <button class="icon-button" data-pick-video="openingVideoFile" title="选择视频">...</button>
+                  <label class="inline-check"><input id="useOpeningVideoFile" type="checkbox" /><span>使用指定</span></label>
+                </div>
+              </div>
+              <div class="field">
+                <label>标题动画特效优先级（0-10）</label>
+                <input id="titleMotionPriority" type="number" min="0" max="10" step="1" />
+              </div>
+              <div class="field">
+                <label>专利文件</label>
+                <div class="path-row">
+                  <input id="patentFile" />
+                  <button class="icon-button" data-pick-media="patentFile" title="选择文件">...</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>专利特效优先级（0-10）</label>
+                <input id="patentPriority" type="number" min="0" max="10" step="1" />
+              </div>
+              <div class="field">
+                <label>薪火传承文件</label>
+                <div class="path-row">
+                  <input id="inheritanceFile" />
+                  <button class="icon-button" data-pick-media="inheritanceFile" title="选择文件">...</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>薪火传承特效优先级（0-10）</label>
+                <input id="inheritancePriority" type="number" min="0" max="10" step="1" />
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <h3>画中画</h3>
+              <div class="field">
+                <label>素材文件夹</label>
+                <div class="path-row">
+                  <input id="pipFolder" />
+                  <button class="icon-button" data-pick-dir="pipFolder" title="选择目录">...</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>触发关键词</label>
+                <textarea id="pipKeywords" class="keyword-textarea" rows="4" placeholder="每行一个关键词，也可以用逗号、顿号分隔"></textarea>
+              </div>
+              <div class="field">
+                <div class="section-row">
+                  <label>自定义画中画列表</label>
+                  <button id="btnAddPipRule" class="button secondary small" type="button">添加一行</button>
+                </div>
+                <div id="pipRuleList" class="pip-rule-list"></div>
+              </div>
+              <div class="pip-layout-grid">
+                <div class="field">
+                  <label>X</label>
+                  <input id="pipX" type="number" min="0" max="1080" />
+                </div>
+                <div class="field">
+                  <label>Y</label>
+                  <input id="pipY" type="number" min="0" max="1920" />
+                </div>
+                <div class="field">
+                  <label>高</label>
+                  <input id="pipHeight" type="number" min="80" max="1920" />
+                </div>
+                <div class="field">
+                  <label>持续秒数</label>
+                  <input id="pipDurationSeconds" type="number" min="0.5" max="30" step="0.1" />
+                </div>
+              </div>
+              <label class="inline-check standalone"><input id="pipCloseAtSentenceEnd" type="checkbox" /><span>句子结束自动关闭</span></label>
+              <div class="field">
+                <label>画中画特效优先级（0-10）</label>
+                <input id="pipPriority" type="number" min="0" max="10" step="1" />
+              </div>
+              <p class="hint">宽度按 16:9 自动计算，只需要调整高度和位置。</p>
+            </div>
+
+            <div class="settings-card">
+              <h3>花字</h3>
+              <div class="field">
+                <label>花字特效优先级（0-10）</label>
+                <input id="textEffectPriority" type="number" min="0" max="10" step="1" />
+              </div>
+              <div class="effect-choice-grid">
+                <label><input type="checkbox" data-text-effect-id="kinetic" />动感弹入</label>
+                <label><input type="checkbox" data-text-effect-id="slide-reveal" />横条揭示</label>
+                <label><input type="checkbox" data-text-effect-id="word-bounce" />逐字弹跳</label>
+                <label><input type="checkbox" data-text-effect-id="spring-up" />弹簧上浮</label>
+                <label><input type="checkbox" data-text-effect-id="bubble" />气泡强调</label>
+              </div>
+              <p class="hint">勾选多个时，每条花字会在这些样式里随机使用；只勾一个时固定使用这一种。</p>
+              <div class="section-row compact">
+                <label>关键词花字</label>
+                <button id="btnAddTextEffectKeywordRule" class="button secondary small" type="button">添加一行</button>
+              </div>
+              <div id="textEffectKeywordRuleList" class="text-effect-keyword-rule-list"></div>
+              <p class="hint">前端先保存触发关键词；后端接入后会用命中的分行后字幕单行做花字。</p>
             </div>
 
             <div class="settings-card">

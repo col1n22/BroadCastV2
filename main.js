@@ -26,7 +26,47 @@ function defaultSettings() {
     modelName: '',
     titleFontPath: desktopPath('字体2', '尔雅新大黑（3500字试用版）.ttf'),
     captionFontPath: desktopPath('字体2', '优设书华体.ttf'),
+    textEffectFontPath: desktopPath('字体2', '优设书华体.ttf'),
+    disclaimerFontPath: desktopPath('字体2', '优设书华体.ttf'),
     bgmFile: path.join(bundlePath, 'assets', 'BGM', 'bgm2.mp3'),
+    bgmVolumePercent: 22,
+    clipPreset: 'title_bgm',
+    clipTitle: true,
+    clipCaption: true,
+    clipBgm: true,
+    clipTitleMotion: false,
+    clipTextEffects: false,
+    textEffectIds: ['kinetic', 'slide-reveal', 'word-bounce', 'spring-up', 'bubble'],
+    textEffectKeywordRules: [],
+    clipPatent: false,
+    clipIntro: false,
+    clipPip: false,
+    bgmStartMode: 'after_title',
+    sfxMode: 'random',
+    sfxFolder: path.join(bundlePath, 'assets', 'keyword_sfx'),
+    sfxFile: '',
+    sfxVolumePercent: 85,
+    useSfxFile: false,
+    keywordSfxEnabled: true,
+    keywordSfxKeywords: '',
+    openingVideoFolder: path.join(bundlePath, 'assets', 'template_assets'),
+    openingVideoFile: '',
+    useOpeningVideoFile: false,
+    titleMotionPriority: 5,
+    pipFolder: path.join(bundlePath, 'assets', 'pip'),
+    pipKeywords: '',
+    pipRules: [],
+    pipPriority: 5,
+    pipX: 156,
+    pipY: 910,
+    pipHeight: 432,
+    pipDurationSeconds: 4,
+    pipCloseAtSentenceEnd: false,
+    patentFile: '',
+    patentPriority: 5,
+    inheritanceFile: '',
+    inheritancePriority: 5,
+    textEffectPriority: 5,
     titleTopColor: '#ffffff',
     titleTopOutlineColor: '#000000',
     titleTopOutlineSize: 8,
@@ -43,6 +83,22 @@ function defaultSettings() {
     disclaimerOutlineColor: '#000000',
     disclaimerOutlineSize: 0,
     disclaimerOpacityPercent: 50,
+    previewTitleX: 80,
+    previewTitleY: 980,
+    previewTitleW: 920,
+    previewTitleH: 500,
+    previewCaptionX: 100,
+    previewCaptionY: 1385,
+    previewCaptionW: 880,
+    previewCaptionH: 220,
+    previewTextEffectX: 100,
+    previewTextEffectY: 1385,
+    previewTextEffectW: 880,
+    previewTextEffectH: 220,
+    previewDisclaimerX: 90,
+    previewDisclaimerY: 1735,
+    previewDisclaimerW: 900,
+    previewDisclaimerH: 150,
     maxItems: 0,
     pollIntervalSeconds: 20,
     timeoutMinutes: 45
@@ -56,7 +112,18 @@ function settingsPath() {
 function loadSettings() {
   try {
     if (fs.existsSync(settingsPath())) {
-      return { ...defaultSettings(), ...JSON.parse(fs.readFileSync(settingsPath(), 'utf8')) };
+      const saved = JSON.parse(fs.readFileSync(settingsPath(), 'utf8'));
+      const merged = { ...defaultSettings(), ...saved };
+      if (saved.useSfxFile === undefined && saved.sfxMode === 'fixed') {
+        merged.useSfxFile = true;
+      }
+      if (saved.clipTitleMotion === undefined && saved.clipPreset === 'title_motion_bgm_effects') {
+        merged.clipTitleMotion = true;
+      }
+      merged.clipTitle = true;
+      merged.clipCaption = true;
+      merged.clipBgm = true;
+      return merged;
     }
   } catch (error) {
     console.error(error);
@@ -66,7 +133,13 @@ function loadSettings() {
 
 function saveSettings(settings) {
   fs.mkdirSync(path.dirname(settingsPath()), { recursive: true });
-  fs.writeFileSync(settingsPath(), JSON.stringify({ ...defaultSettings(), ...settings }, null, 2), 'utf8');
+  fs.writeFileSync(settingsPath(), JSON.stringify({
+    ...defaultSettings(),
+    ...settings,
+    clipTitle: true,
+    clipCaption: true,
+    clipBgm: true
+  }, null, 2), 'utf8');
   return loadSettings();
 }
 
@@ -77,7 +150,7 @@ function createWindow() {
     minWidth: 1080,
     minHeight: 720,
     backgroundColor: '#f4f5f7',
-    title: '胡老师视频剪辑',
+    title: '医生视频剪辑',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -173,7 +246,7 @@ ipcMain.handle('run:start', async (_event, payload) => {
   const contentOverridesPath = path.join(jobsDir, `job_${jobId}_contents.json`);
   fs.writeFileSync(titleOverridesPath, JSON.stringify(payload?.titleOverrides || {}, null, 2), 'utf8');
   fs.writeFileSync(contentOverridesPath, JSON.stringify(payload?.contentOverrides || {}, null, 2), 'utf8');
-  const jobPayload = { ...payload, titleOverridesPath, contentOverridesPath, forceFreshChanjing: true };
+  const jobPayload = { ...payload, titleOverridesPath, contentOverridesPath, forceFreshChanjing: false };
   fs.writeFileSync(jobPath, JSON.stringify(jobPayload, null, 2), 'utf8');
 
   const scriptPath = path.join(__dirname, 'python', 'desktop_pipeline.py');

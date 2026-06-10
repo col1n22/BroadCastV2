@@ -30,6 +30,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -212,6 +213,13 @@ textarea {
   background: #fff;
 }
 
+.button.small {
+  min-height: 34px;
+  padding: 7px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .button.danger {
   color: #fff;
   background: var(--red);
@@ -226,6 +234,12 @@ textarea {
 .icon-button {
   width: 40px;
   background: #eef1f6;
+}
+
+.icon-button.danger {
+  color: #fff;
+  background: var(--red);
+  border-color: var(--red);
 }
 
 .grid {
@@ -248,6 +262,8 @@ textarea {
 .field {
   display: grid;
   gap: 7px;
+  min-width: 0;
+  align-content: start;
 }
 
 .field label {
@@ -257,6 +273,7 @@ textarea {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   min-height: 40px;
@@ -283,6 +300,96 @@ textarea {
   display: grid;
   grid-template-columns: 1fr 40px;
   gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.path-row.with-toggle {
+  grid-template-columns: minmax(0, 1fr) 40px auto;
+  align-items: center;
+}
+
+.path-row input {
+  min-width: 0;
+}
+
+.section-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.section-row label {
+  margin: 0;
+}
+
+.section-row.compact {
+  margin-top: 12px;
+}
+
+.pip-rule-list,
+.text-effect-keyword-rule-list {
+  display: grid;
+  gap: 10px;
+}
+
+.pip-rule-row,
+.text-effect-keyword-rule-row {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.pip-rule-row textarea,
+.text-effect-keyword-rule-row textarea {
+  min-height: 62px;
+}
+
+.pip-rule-row .path-row {
+  grid-template-columns: minmax(0, 1fr) 40px 40px;
+}
+
+.rule-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.pip-rule-priority {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  align-items: center;
+  gap: 8px;
+  color: #3f4652;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pip-rule-priority input {
+  min-height: 36px;
+}
+
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #3f4652;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.inline-check.standalone {
+  justify-content: flex-start;
+  min-height: 24px;
+}
+
+.keyword-textarea {
+  min-height: 96px;
+  line-height: 1.45;
 }
 
 .summary-strip {
@@ -292,7 +399,7 @@ textarea {
   margin: 18px 0;
 }
 
-.summary-strip div,
+.summary-strip > div,
 .settings-card,
 .table-wrap,
 .log-box {
@@ -302,7 +409,7 @@ textarea {
   box-shadow: var(--shadow);
 }
 
-.summary-strip div {
+.summary-strip > div {
   padding: 15px;
 }
 
@@ -314,7 +421,96 @@ textarea {
   white-space: nowrap;
 }
 
-.summary-strip span {
+.summary-select {
+  min-height: 38px;
+  padding: 7px 9px;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.summary-strip .clip-config-card {
+  padding: 12px 15px;
+  min-width: 0;
+}
+
+.clip-multiselect {
+  position: relative;
+}
+
+.clip-config-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+}
+
+.clip-config-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+#clipConfigText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clip-config-caret {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.clip-config-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 14px 36px rgba(20, 26, 38, 0.18);
+}
+
+.clip-config-menu[hidden] {
+  display: none;
+}
+
+.clip-config-menu label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.clip-config-menu input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+}
+
+.clip-config-menu .required-clip {
+  color: #3f4652;
+}
+
+.clip-config-menu .required-clip input {
+  cursor: not-allowed;
+}
+
+.summary-strip > div > span {
   display: block;
   margin-top: 4px;
   font-size: 12px;
@@ -434,17 +630,166 @@ th {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+  align-items: start;
 }
 
 .settings-card {
   padding: 18px;
   display: grid;
   gap: 14px;
+  align-content: start;
+  align-self: start;
+  min-width: 0;
 }
 
 .settings-card h3 {
   margin: 0;
   font-size: 17px;
+}
+
+.preview-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 430px) minmax(280px, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.preview-stage-card {
+  display: flex;
+  justify-content: center;
+  padding: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.preview-frame {
+  position: relative;
+  width: min(390px, 100%);
+  aspect-ratio: 9 / 16;
+  overflow: hidden;
+  background: #262b34;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+  user-select: none;
+  touch-action: none;
+}
+
+.preview-video-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0)),
+    radial-gradient(circle at 50% 26%, #677489 0 13%, transparent 14%),
+    linear-gradient(160deg, #394251 0%, #1d222b 54%, #2f343c 100%);
+}
+
+.preview-box {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  padding: 4px;
+  text-align: center;
+  cursor: move;
+  border: 1px dashed rgba(255, 255, 255, 0.55);
+  background: rgba(31, 94, 255, 0.08);
+  overflow: visible;
+}
+
+.preview-box.selected {
+  border-color: #ffde00;
+  box-shadow: 0 0 0 2px rgba(255, 222, 0, 0.4);
+}
+
+.preview-title-box {
+  align-content: space-between;
+}
+
+.preview-title-line,
+.preview-caption-box,
+.preview-text-effect-box,
+.preview-disclaimer-box {
+  width: 100%;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1.08;
+  white-space: nowrap;
+}
+
+#previewCaptionText,
+#previewTextEffectText,
+#previewDisclaimerText {
+  white-space: nowrap;
+}
+
+.preview-title-top {
+  color: #fff;
+}
+
+.preview-title-middle {
+  color: #ffde00;
+}
+
+.preview-title-bottom {
+  color: #ff2a00;
+}
+
+.preview-caption-box {
+  color: #fff;
+  line-height: 1.22;
+}
+
+.preview-text-effect-box {
+  color: #fff;
+  line-height: 1.12;
+  background: rgba(255, 222, 0, 0.1);
+  border-color: rgba(255, 222, 0, 0.72);
+}
+
+#previewTextEffectText {
+  padding: 2px 8px;
+  color: inherit;
+}
+
+.preview-pip-box {
+  padding: 0;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 13px;
+  font-weight: 900;
+  background:
+    linear-gradient(135deg, rgba(28, 224, 208, 0.18), rgba(255, 222, 0, 0.16)),
+    linear-gradient(160deg, #313946, #111722);
+}
+
+.preview-pip-box span:first-child {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.42);
+}
+
+.preview-disclaimer-box {
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.2;
+}
+
+.preview-resize-handle {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  background: #ffde00;
+  border: 2px solid #171b22;
+  border-radius: 5px 0 5px 0;
+}
+
+.preview-controls {
+  align-self: stretch;
 }
 
 .style-grid {
@@ -468,6 +813,35 @@ th {
 
 .style-grid input[type="color"] {
   padding: 3px;
+}
+
+.effect-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.effect-choice-grid label {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-weight: 700;
+}
+
+.effect-choice-grid input {
+  width: 16px;
+  height: 16px;
+}
+
+.pip-layout-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
+  gap: 10px;
 }
 
 .log-box {
@@ -547,6 +921,7 @@ th {
 
   .grid.two,
   .settings-grid,
+  .preview-layout,
   .summary-strip {
     grid-template-columns: 1fr;
   }

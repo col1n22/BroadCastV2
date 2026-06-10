@@ -1,7 +1,7 @@
 {
   "name": "hu-teacher-video-app",
   "version": "0.1.0",
-  "description": "胡老师口播视频自动剪辑桌面端",
+  "description": "医生口播视频自动剪辑桌面端",
   "main": "main.js",
   "author": "Hu Teacher Pipeline",
   "license": "UNLICENSED",
@@ -13,7 +13,7 @@
   },
   "build": {
     "appId": "local.hu-teacher.video",
-    "productName": "胡老师视频剪辑",
+    "productName": "医生视频剪辑",
     "asar": false,
     "files": [
       "main.js",
