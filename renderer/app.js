@@ -5,6 +5,14 @@ const fields = [
   'chanjingBaseUrl',
   'chanjingAppId',
   'chanjingSecretKey',
+  'chanjingAccountIndex',
+  'runChanjingAccountIndex',
+  'runRandomAccountIndexes',
+  'runRotateAccountIndexes',
+  'chanjingAssetIndex',
+  'currentTemplateId',
+  'templateSourceAssetIndex',
+  'assetSelectionMode',
   'modelBaseUrl',
   'modelApiKey',
   'modelName',
@@ -18,8 +26,10 @@ const fields = [
   'clipTitle',
   'clipCaption',
   'clipBgm',
+  'hideCtaCaptions',
   'clipTitleMotion',
   'clipTextEffects',
+  'clipLogo',
   'clipPatent',
   'clipIntro',
   'clipPip',
@@ -62,10 +72,15 @@ const fields = [
   'captionColor',
   'captionOutlineColor',
   'captionOutlineSize',
+  'captionBufferSeconds',
   'disclaimerColor',
   'disclaimerOutlineColor',
   'disclaimerOutlineSize',
   'disclaimerOpacityPercent',
+  'logoFolder',
+  'logoFile',
+  'useLogoFile',
+  'logoOpacityPercent',
   'previewTitleX',
   'previewTitleY',
   'previewTitleW',
@@ -86,6 +101,10 @@ const fields = [
   'previewPipY',
   'previewPipW',
   'previewPipH',
+  'previewLogoX',
+  'previewLogoY',
+  'previewLogoW',
+  'previewLogoH',
   'maxItems',
   'pollIntervalSeconds',
   'timeoutMinutes'
@@ -94,6 +113,11 @@ const fields = [
 let settings = {};
 let inputJsonPath = '';
 let running = false;
+let runQueue = [];
+let activeQueueItem = null;
+let queueSeq = 0;
+let queueStopRequested = false;
+let activeRunIndexes = new Set();
 let currentSummary = null;
 let lockedThroughIndex = 0;
 let stdoutBuffer = '';
@@ -106,20 +130,29 @@ let stderrTail = '';
 let currentRunFailures = 0;
 let contentOverrides = {};
 let editingContentIndex = 0;
+let customTextSaving = false;
 let previewDragState = null;
+let chanjingAssets = [];
+let defaultTemplateSnapshot = null;
+let templateManagerAccountIndex = 1;
+let templateManagerDraftConfigs = new Map();
+let templateManagerDraftAccounts = [];
+let templateManagerFilterAccountIndexes = new Set();
 
 const requiredClipFields = new Set(['clipTitle', 'clipCaption', 'clipBgm']);
-const optionalClipFields = ['clipTitleMotion', 'clipIntro', 'clipPatent', 'clipPip', 'clipTextEffects'];
+const optionalClipFields = ['hideCtaCaptions', 'clipTitleMotion', 'clipIntro', 'clipPatent', 'clipPip', 'clipTextEffects', 'clipLogo'];
 const textEffectIds = ['kinetic', 'slide-reveal', 'word-bounce', 'spring-up', 'bubble'];
 const clipFieldLabels = {
   clipTitle: '标题',
   clipCaption: '字幕',
   clipBgm: 'BGM',
+  hideCtaCaptions: '隐藏CTA字幕',
   clipTitleMotion: '标题动画',
   clipIntro: '身份背书',
   clipPatent: '专利',
   clipPip: '画中画',
-  clipTextEffects: '花字'
+  clipTextEffects: '花字',
+  clipLogo: 'Logo'
 };
 const clipPresetFlags = {
   title_bgm: {},
@@ -133,6 +166,83 @@ const clipPresetFlags = {
   title_bgm_pip: { clipPip: true },
   full: { clipTitleMotion: true, clipIntro: true, clipPatent: true, clipPip: true, clipTextEffects: true }
 };
+
+const defaultAccounts = [
+  { name: '账号1' },
+  { name: '账号2' },
+  { name: '账号3' }
+];
+const assetSelectionModeLabels = {
+  random_account: '指定账号随机模板',
+  rotate_account: '指定账号轮换模板',
+  random_all: '所有账号所有模板全部随机',
+  random: '所有账号所有模板全部随机',
+  custom: '指定账号随机模板'
+};
+const assetManagerAllAssetsValue = '__all__';
+const queueStatusLabels = {
+  pending: '等待',
+  running: '进行中',
+  done: '已完成',
+  failed: '失败',
+  stopped: '已停止'
+};
+const templateFields = [
+  'titleFontPath',
+  'captionFontPath',
+  'textEffectFontPath',
+  'disclaimerFontPath',
+  'titleTopColor',
+  'titleTopOutlineColor',
+  'titleTopOutlineSize',
+  'titleMiddleColor',
+  'titleMiddleOutlineColor',
+  'titleMiddleOutlineSize',
+  'titleBottomColor',
+  'titleBottomOutlineColor',
+  'titleBottomOutlineSize',
+  'captionColor',
+  'captionOutlineColor',
+  'captionOutlineSize',
+  'captionBufferSeconds',
+  'disclaimerColor',
+  'disclaimerOutlineColor',
+  'disclaimerOutlineSize',
+  'disclaimerOpacityPercent',
+  'logoFolder',
+  'logoFile',
+  'useLogoFile',
+  'logoOpacityPercent',
+  'previewTitleX',
+  'previewTitleY',
+  'previewTitleW',
+  'previewTitleH',
+  'previewCaptionX',
+  'previewCaptionY',
+  'previewCaptionW',
+  'previewCaptionH',
+  'previewTextEffectX',
+  'previewTextEffectY',
+  'previewTextEffectW',
+  'previewTextEffectH',
+  'previewDisclaimerX',
+  'previewDisclaimerY',
+  'previewDisclaimerW',
+  'previewDisclaimerH',
+  'previewPipX',
+  'previewPipY',
+  'previewPipW',
+  'previewPipH',
+  'previewLogoX',
+  'previewLogoY',
+  'previewLogoW',
+  'previewLogoH',
+  'pipX',
+  'pipY',
+  'pipWidth',
+  'pipHeight',
+  'previewVisibleObjects'
+];
 const previewCanvas = { width: 1080, height: 1920 };
 const previewSafeTextWidth = 980;
 const previewTitleMinFontSize = 72;
@@ -142,8 +252,19 @@ const previewDefaults = {
   caption: { prefix: 'previewCaption', x: 100, y: 1385, w: 880, h: 220, minW: 280, minH: 90 },
   textEffect: { prefix: 'previewTextEffect', x: 100, y: 1385, w: 880, h: 220, minW: 280, minH: 90 },
   pip: { prefix: 'previewPip', x: 156, y: 910, w: 768, h: 432, minW: 142, minH: 80, fixedAspect: pipAspectRatio },
+  logo: { prefix: 'previewLogo', x: 90, y: 88, w: 180, h: 180, minW: 48, minH: 48 },
   disclaimer: { prefix: 'previewDisclaimer', x: 90, y: 1735, w: 900, h: 150, minW: 280, minH: 70 }
 };
+const previewObjectLabels = {
+  title: '标题',
+  caption: '字幕',
+  textEffect: '花字限制',
+  pip: '画中画',
+  logo: 'Logo',
+  disclaimer: '底部声明'
+};
+const previewObjectKinds = Object.keys(previewDefaults);
+let previewVisibleKinds = new Set(previewObjectKinds);
 
 function $(id) {
   return document.getElementById(id);
@@ -170,6 +291,157 @@ function trimTail(value, maxLength = 12000) {
 
 function appendTail(buffer, text) {
   return trimTail(`${buffer || ''}${text || ''}`);
+}
+
+function cloneForQueue(value) {
+  return JSON.parse(JSON.stringify(value || {}));
+}
+
+function queueRowsText(indexes) {
+  const rows = Array.isArray(indexes) ? indexes : [];
+  const visible = rows.slice(0, 10).join('、');
+  return rows.length > 10 ? `${visible} 等 ${rows.length} 行` : `${visible || '-'}`;
+}
+
+function queueCounts() {
+  return runQueue.reduce(
+    (counts, item) => {
+      counts[item.status] = (counts[item.status] || 0) + 1;
+      return counts;
+    },
+    { pending: 0, running: 0, done: 0, failed: 0 }
+  );
+}
+
+function renderQueue() {
+  const list = $('queueList');
+  if (!list) return;
+  const counts = queueCounts();
+  if ($('queuePendingCount')) $('queuePendingCount').textContent = String(counts.pending || 0);
+  if ($('queueRunningCount')) $('queueRunningCount').textContent = String(counts.running || 0);
+  if ($('queueDoneCount')) $('queueDoneCount').textContent = String(counts.done || 0);
+  if ($('queueFailedCount')) $('queueFailedCount').textContent = String(counts.failed || 0);
+
+  if (!runQueue.length) {
+    list.innerHTML = '<div class="queue-empty">还没有加入队列的任务</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  for (const item of runQueue) {
+    const card = document.createElement('div');
+    card.className = `queue-card queue-card-${item.status}`;
+    const canRemove = item.status !== 'running';
+    const meta = [
+      `加入 ${formatTimestamp(item.createdAt)}`,
+      item.batchOutputName ? `输出 ${item.batchOutputName}` : '',
+      item.startedAt ? `开始 ${formatTimestamp(item.startedAt)}` : '',
+      item.completedAt ? `结束 ${formatTimestamp(item.completedAt)}` : '',
+      item.failures ? `失败 ${item.failures} 条` : '',
+      item.error ? item.error : ''
+    ].filter(Boolean).join(' · ');
+    card.innerHTML = `
+      <div class="queue-card-header">
+        <div class="queue-card-title">
+          <strong>第 ${item.id} 批：${escapeHtml(item.name || '未命名任务')}</strong>
+          <span>行号：${escapeHtml(queueRowsText(item.selectedIndexes))}</span>
+        </div>
+        <div class="queue-card-actions">
+          <span class="queue-status ${item.status}">${escapeHtml(queueStatusLabels[item.status] || item.status)}</span>
+          ${canRemove ? `<button class="button secondary small-button" data-queue-remove="${item.id}" type="button">删除</button>` : ''}
+        </div>
+      </div>
+      <div class="queue-meta">${escapeHtml(meta || '等待开始')}</div>
+    `;
+    list.appendChild(card);
+  }
+}
+
+function refreshQueueRowLocks() {
+  const queuedIndexes = queuedRunIndexes();
+  rows().forEach((row) => {
+    const rowIndex = Number(row.dataset.rowIndex || 0);
+    const locked = queuedIndexes.has(rowIndex) || row.classList.contains('row-done') || row.classList.contains('row-failed');
+    setRowLocked(row, locked);
+  });
+  updateActiveRunSelectionLocks();
+  updateSelectAllState();
+}
+
+function removeQueueItem(id) {
+  const queueId = Number(id || 0);
+  const item = runQueue.find((entry) => entry.id === queueId);
+  if (!item || item.status === 'running') return;
+  runQueue = runQueue.filter((entry) => entry.id !== queueId);
+  refreshQueueRowLocks();
+  renderQueue();
+  appendLog(`[队列] 已删除第 ${queueId} 批\n`);
+}
+
+function clearSelectedRows() {
+  document.querySelectorAll('[data-row-select]').forEach((el) => {
+    el.checked = false;
+  });
+  updateSelectedCount();
+  updateSelectAllState();
+}
+
+function queuedRunIndexes() {
+  const indexes = new Set(activeRunIndexes);
+  runQueue.forEach((item) => {
+    if (item.status !== 'pending' && item.status !== 'running') return;
+    (item.selectedIndexes || []).forEach((index) => indexes.add(index));
+  });
+  return indexes;
+}
+
+function updateActiveRunSelectionLocks() {
+  const queuedIndexes = queuedRunIndexes();
+  document.querySelectorAll('[data-row-select]').forEach((el) => {
+    const index = Number(el.dataset.rowSelect || 0);
+    el.disabled = queuedIndexes.has(index);
+  });
+  updateSelectAllState();
+}
+
+function lockPendingQueueRows() {
+  const queuedIndexes = queuedRunIndexes();
+  queuedIndexes.forEach((index) => {
+    const row = rowForIndex(index);
+    if (row && !row.classList.contains('row-done') && !row.classList.contains('row-failed')) {
+      setRowLocked(row, true);
+    }
+  });
+  updateActiveRunSelectionLocks();
+}
+
+function resetRowsForQueueItem(item) {
+  lockedThroughIndex = 0;
+  for (const index of item.selectedIndexes || []) {
+    rowTimings.delete(index);
+    setRowTime(index, '未开始');
+    const row = rowForIndex(index);
+    if (!row) continue;
+    row.classList.remove('row-running', 'row-done', 'row-failed', 'row-locked');
+    setRowLocked(row, false);
+  }
+}
+
+function lockActiveQueueRows() {
+  activeRunIndexes.forEach((index) => {
+    const row = rowForIndex(index);
+    if (row) setRowLocked(row, true);
+  });
+  updateActiveRunSelectionLocks();
+}
+
+function markUnfinishedActiveRowsFailed() {
+  activeRunIndexes.forEach((index) => {
+    const row = rowForIndex(index);
+    if (row && !row.classList.contains('row-done') && !row.classList.contains('row-failed')) {
+      markFailedRow(index);
+    }
+  });
 }
 
 function normalizeClipPreset(value) {
@@ -245,6 +517,57 @@ function toggleClipConfigOpen() {
   setClipConfigOpen(Boolean($('clipConfigMenu')?.hidden));
 }
 
+function normalizePreviewVisibleObjects(value) {
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/[,，\s]+/)
+      : previewObjectKinds;
+  const visible = raw.filter((kind) => previewObjectKinds.includes(kind));
+  return visible.length ? visible : [...previewObjectKinds];
+}
+
+function collectPreviewVisibleObjects() {
+  const checked = Array.from(document.querySelectorAll('[data-preview-visibility]:checked'))
+    .map((input) => input.dataset.previewVisibility)
+    .filter((kind) => previewObjectKinds.includes(kind));
+  return checked.length ? checked : [...previewObjectKinds];
+}
+
+function previewVisibilityText(value = [...previewVisibleKinds]) {
+  const parts = value
+    .filter((kind) => previewObjectKinds.includes(kind))
+    .map((kind) => previewObjectLabels[kind]);
+  return parts.length === previewObjectKinds.length ? '全部显示' : parts.join('+');
+}
+
+function syncPreviewVisibilityControls() {
+  document.querySelectorAll('[data-preview-visibility]').forEach((input) => {
+    input.checked = previewVisibleKinds.has(input.dataset.previewVisibility);
+  });
+  const text = $('previewVisibilityText');
+  if (text) text.textContent = previewVisibilityText();
+}
+
+function setPreviewVisibilityOpen(open) {
+  const menu = $('previewVisibilityMenu');
+  const button = $('previewVisibilityButton');
+  if (!menu || !button) return;
+  menu.hidden = !open;
+  button.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function togglePreviewVisibilityOpen() {
+  setPreviewVisibilityOpen(Boolean($('previewVisibilityMenu')?.hidden));
+}
+
+function updatePreviewVisibilityFromInputs() {
+  const selected = collectPreviewVisibleObjects();
+  previewVisibleKinds = new Set(selected);
+  syncPreviewVisibilityControls();
+  selectPreviewBox($('previewObject')?.value || selected[0]);
+}
+
 function formatDuration(ms) {
   const total = Math.max(0, Math.floor(Number(ms || 0) / 1000));
   const hours = Math.floor(total / 3600);
@@ -260,6 +583,19 @@ function formatTimestamp(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function compactTimestamp(value = Date.now()) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(Date.now());
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+    String(date.getHours()).padStart(2, '0'),
+    String(date.getMinutes()).padStart(2, '0'),
+    String(date.getSeconds()).padStart(2, '0')
+  ].join('');
 }
 
 function eventTimeMs(event, key, fallback = Date.now()) {
@@ -316,10 +652,12 @@ function normalizePipRules(value) {
   return raw
     .map((rule) => ({
       keywords: String(rule?.keywords || '').trim(),
+      videoFolder: String(rule?.videoFolder || rule?.folder || '').trim(),
       videoFile: String(rule?.videoFile || '').trim(),
+      useVideoFile: rule?.useVideoFile === undefined ? true : Boolean(rule.useVideoFile),
       priority: Number.isFinite(Number(rule?.priority)) ? Number(rule.priority) : ''
     }))
-    .filter((rule) => rule.keywords || rule.videoFile || rule.priority !== '');
+    .filter((rule) => rule.keywords || rule.videoFolder || rule.videoFile || rule.priority !== '');
 }
 
 function normalizeTextEffectKeywordRules(value) {
@@ -336,12 +674,14 @@ function collectPipRules() {
   return Array.from(document.querySelectorAll('[data-pip-rule-row]'))
     .map((row) => ({
       keywords: row.querySelector('[data-pip-rule-keywords]')?.value.trim() || '',
+      videoFolder: row.querySelector('[data-pip-rule-folder]')?.value.trim() || '',
       videoFile: row.querySelector('[data-pip-rule-video]')?.value.trim() || '',
+      useVideoFile: Boolean(row.querySelector('[data-pip-rule-use-video]')?.checked),
       priority: row.querySelector('[data-pip-rule-priority]')?.value === ''
         ? ''
         : Number(row.querySelector('[data-pip-rule-priority]')?.value)
     }))
-    .filter((rule) => rule.keywords || rule.videoFile || rule.priority !== '');
+    .filter((rule) => rule.keywords || rule.videoFolder || rule.videoFile || rule.priority !== '');
 }
 
 function collectTextEffectKeywordRules() {
@@ -380,9 +720,13 @@ function addPipRuleRow(rule = {}) {
   row.innerHTML = `
     <textarea data-pip-rule-keywords rows="2" placeholder="关键词，多个用逗号或换行分隔">${escapeHtml(rule.keywords || '')}</textarea>
     <div class="path-row">
-      <input data-pip-rule-video value="${escapeHtml(rule.videoFile || '')}" placeholder="选择这一行使用的画中画视频" />
-      <button class="icon-button" type="button" data-pip-rule-pick title="选择视频">...</button>
-      <button class="icon-button danger" type="button" data-pip-rule-remove title="删除">×</button>
+      <input data-pip-rule-folder value="${escapeHtml(rule.videoFolder || '')}" placeholder="随机素材文件夹" />
+      <button class="icon-button" type="button" data-pip-rule-pick-folder title="选择目录">...</button>
+    </div>
+    <div class="path-row with-toggle">
+      <input data-pip-rule-video value="${escapeHtml(rule.videoFile || '')}" placeholder="指定素材文件" />
+      <button class="icon-button" type="button" data-pip-rule-pick title="选择素材">...</button>
+      <label class="inline-check"><input data-pip-rule-use-video type="checkbox" ${rule.useVideoFile === false ? '' : 'checked'} /><span>使用指定</span></label>
     </div>
   `;
   const priorityRow = document.createElement('label');
@@ -392,6 +736,10 @@ function addPipRuleRow(rule = {}) {
     <input data-pip-rule-priority type="number" min="0" max="10" step="1" value="${escapeHtml(rule.priority === '' || rule.priority === undefined ? '' : rule.priority)}" placeholder="跟随画中画" />
   `;
   row.appendChild(priorityRow);
+  const actions = document.createElement('div');
+  actions.className = 'rule-actions';
+  actions.innerHTML = '<button class="icon-button danger" type="button" data-pip-rule-remove title="删除">×</button>';
+  row.appendChild(actions);
   list.appendChild(row);
 }
 
@@ -418,7 +766,253 @@ function addTextEffectKeywordRuleRow(rule = {}) {
   list.appendChild(row);
 }
 
-function collectSettings() {
+function cloneTemplateValue(value) {
+  if (Array.isArray(value)) return [...value];
+  if (value && typeof value === 'object') return JSON.parse(JSON.stringify(value));
+  return value;
+}
+
+function normalizeAccounts(value) {
+  const source = Array.isArray(value) ? value : defaultAccounts;
+  return source.map((account, index) => {
+    const name = typeof account === 'string' ? account : account?.name;
+    return { name: String(name || `账号${index + 1}`).trim() || `账号${index + 1}` };
+  });
+}
+
+function normalizeAssetSelectionMode(value) {
+  const text = String(value || '').trim();
+  if (text === 'random') return 'random_all';
+  if (text === 'rotate') return 'rotate_account';
+  if (text === 'custom') return 'random_account';
+  return Object.prototype.hasOwnProperty.call(assetSelectionModeLabels, text) ? text : 'random_account';
+}
+
+function normalizeAssetOverrides(value) {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const normalized = {};
+  for (const [key, item] of Object.entries(raw)) {
+    const index = Number(key);
+    if (!index || index < 1) continue;
+    normalized[index] = {
+      name: String(item?.name || `模板${index}`).trim() || `模板${index}`,
+      enabled: item?.enabled !== false
+    };
+  }
+  return normalized;
+}
+
+function defaultLogoFilePath(bundlePath = settings.bundlePath) {
+  const root = String(bundlePath || '').replace(/[\\/]+$/, '');
+  if (!root) return '';
+  const sep = root.includes('\\') ? '\\' : '/';
+  return `${root}${sep}assets${sep}template_assets${sep}medical_logo_ref_1080.png`;
+}
+
+function templateDisplayName(assetOrName, index = 0) {
+  const raw = typeof assetOrName === 'string' ? assetOrName : assetOrName?.label;
+  const fallbackIndex = Number(index || assetOrName?.index || 0);
+  const text = String(raw || '').trim();
+  if (!text) return `模板${fallbackIndex || ''}`.trim();
+  return text;
+}
+
+function accountName(index = settings.chanjingAccountIndex) {
+  const accountIndex = Math.max(1, Number(index || 1));
+  const accounts = normalizeAccounts(settings.chanjingAccounts);
+  if (!accounts.length) return '未添加账号';
+  return accounts[accountIndex - 1]?.name || `账号${accountIndex}`;
+}
+
+function accountCount() {
+  return normalizeAccounts(settings.chanjingAccounts).length;
+}
+
+function normalizeTemplateMap(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {};
+}
+
+function newTemplateId() {
+  return `tpl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function templateKey(accountIndex = settings.chanjingAccountIndex, assetIndex = settings.chanjingAssetIndex) {
+  const account = Math.max(1, Number(accountIndex || 1));
+  const asset = Math.max(1, Number(assetIndex || 1));
+  return `${account}:${asset}`;
+}
+
+function captureTemplate(source) {
+  const template = {};
+  for (const field of templateFields) {
+    if (source[field] !== undefined) {
+      template[field] = cloneTemplateValue(source[field]);
+    }
+  }
+  return template;
+}
+
+function templateFallback() {
+  return defaultTemplateSnapshot ? captureTemplate(defaultTemplateSnapshot) : captureTemplate(settings);
+}
+
+function newTemplateDefaultConfig() {
+  const template = templateFallback();
+  for (const defaults of Object.values(previewDefaults)) {
+    template[`${defaults.prefix}X`] = defaults.x;
+    template[`${defaults.prefix}Y`] = defaults.y;
+    template[`${defaults.prefix}W`] = defaults.w;
+    template[`${defaults.prefix}H`] = defaults.h;
+  }
+  template.pipX = previewDefaults.pip.x;
+  template.pipY = previewDefaults.pip.y;
+  template.pipWidth = previewDefaults.pip.w;
+  template.pipHeight = previewDefaults.pip.h;
+  template.previewVisibleObjects = [...previewObjectKinds];
+  return template;
+}
+
+function templateConfigFrom(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? (value.config && typeof value.config === 'object' ? value.config : value)
+    : {};
+  return captureTemplate(source);
+}
+
+function normalizeTemplateDefinition(value, accountIndex, position) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const assetIndex = Math.max(1, Number(source.assetIndex || source.chanjingAssetIndex || source.asset || 1));
+  const id = String(source.id || `tpl_${accountIndex}_${position}_${assetIndex}`).trim();
+  return {
+    id,
+    name: String(source.name || `模板${position}`).trim() || `模板${position}`,
+    assetIndex,
+    enabled: source.enabled !== false,
+    config: templateConfigFrom(source)
+  };
+}
+
+function normalizeAccountTemplates(value) {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const normalized = {};
+  for (const [accountKey, list] of Object.entries(raw)) {
+    const accountIndex = Math.max(1, Number(accountKey || 1));
+    if (!Array.isArray(list)) continue;
+    normalized[accountIndex] = list
+      .map((item, index) => normalizeTemplateDefinition(item, accountIndex, index + 1))
+      .filter((item) => item.id);
+  }
+  return normalized;
+}
+
+function migrateLegacyAccountTemplates(value, legacyValue) {
+  const normalized = normalizeAccountTemplates(value);
+  if (Object.values(normalized).some((list) => list.length)) return normalized;
+
+  const legacy = normalizeTemplateMap(legacyValue);
+  for (const [key, config] of Object.entries(legacy)) {
+    const [accountRaw, assetRaw] = key.split(':');
+    const accountIndex = Math.max(1, Number(accountRaw || 1));
+    const assetIndex = Math.max(1, Number(assetRaw || 1));
+    const list = normalized[accountIndex] || [];
+    list.push({
+      id: `tpl_${accountIndex}_${list.length + 1}_${assetIndex}`,
+      name: `模板${list.length + 1}`,
+      assetIndex,
+      enabled: true,
+      config: templateConfigFrom(config)
+    });
+    normalized[accountIndex] = list;
+  }
+  return normalized;
+}
+
+function accountTemplateList(accountIndex = settings.chanjingAccountIndex, includeDisabled = false) {
+  const account = Math.max(1, Number(accountIndex || 1));
+  const list = normalizeAccountTemplates(settings.accountTemplates)[account] || [];
+  return includeDisabled ? list : list.filter((template) => template.enabled !== false);
+}
+
+function templateById(accountIndex, templateId, includeDisabled = true) {
+  const id = String(templateId || '');
+  return accountTemplateList(accountIndex, includeDisabled).find((template) => template.id === id) || null;
+}
+
+function firstEnabledTemplate(accountIndex = settings.chanjingAccountIndex) {
+  return accountTemplateList(accountIndex, false)[0] || null;
+}
+
+function enabledTemplateEntries() {
+  const templates = normalizeAccountTemplates(settings.accountTemplates);
+  const entries = [];
+  for (const [accountKey, list] of Object.entries(templates)) {
+    const accountIndex = Math.max(1, Number(accountKey || 1));
+    for (const template of list) {
+      if (template.enabled !== false) {
+        entries.push({ accountIndex, template });
+      }
+    }
+  }
+  return entries;
+}
+
+function enabledTemplateCount() {
+  return enabledTemplateEntries().length;
+}
+
+function firstAccountWithEnabledTemplate() {
+  return enabledTemplateEntries()[0]?.accountIndex || 0;
+}
+
+function selectedTemplate(accountIndex = settings.chanjingAccountIndex) {
+  return templateById(accountIndex, settings.currentTemplateId, false) || firstEnabledTemplate(accountIndex);
+}
+
+function templateChoiceValue(accountIndex, templateId) {
+  const account = Math.max(1, Number(accountIndex || 1));
+  return `${account}:${String(templateId || '')}`;
+}
+
+function parseTemplateChoice(value, fallbackAccount = settings.runChanjingAccountIndex || settings.chanjingAccountIndex) {
+  const text = String(value || '').trim();
+  if (!text) return { accountIndex: Math.max(1, Number(fallbackAccount || 1)), templateId: '' };
+  const match = text.match(/^(\d+):(.+)$/);
+  if (match) {
+    return {
+      accountIndex: Math.max(1, Number(match[1] || 1)),
+      templateId: match[2]
+    };
+  }
+  return {
+    accountIndex: Math.max(1, Number(fallbackAccount || 1)),
+    templateId: text
+  };
+}
+
+function templateChoiceByValue(value) {
+  const choice = parseTemplateChoice(value);
+  const template = templateById(choice.accountIndex, choice.templateId, false);
+  return template ? { accountIndex: choice.accountIndex, template } : null;
+}
+
+function allTemplateChoices() {
+  const accounts = normalizeAccounts(settings.chanjingAccounts);
+  const choices = [];
+  accounts.forEach((_account, accountOffset) => {
+    const accountIndex = accountOffset + 1;
+    accountTemplateList(accountIndex, false).forEach((template) => {
+      choices.push({ accountIndex, template });
+    });
+  });
+  return choices;
+}
+
+function templateForSelection(accountIndex, templateId) {
+  const template = templateById(accountIndex, templateId, true);
+  return template?.config || templateFallback();
+}
+
+function collectSettingsBase() {
   const next = {};
   for (const field of fields) {
     const el = $(field);
@@ -431,6 +1025,52 @@ function collectSettings() {
       next[field] = el.value.trim();
     }
   }
+  return next;
+}
+
+function stashCurrentTemplate(accountIndex = settings.chanjingAccountIndex, templateId = settings.currentTemplateId, source = null) {
+  const current = source || collectSettingsBase();
+  current.previewVisibleObjects = [...previewVisibleKinds];
+  current.pipX = Number(current.previewPipX || current.pipX || previewDefaults.pip.x);
+  current.pipY = Number(current.previewPipY || current.pipY || previewDefaults.pip.y);
+  current.pipHeight = Number(current.previewPipH || current.pipHeight || previewDefaults.pip.h);
+  current.pipWidth = Math.round(current.pipHeight * pipAspectRatio);
+  const templates = normalizeAccountTemplates(settings.accountTemplates);
+  const account = Math.max(1, Number(accountIndex || 1));
+  const id = String(templateId || '');
+  if (!id) return templates;
+  const list = templates[account] || [];
+  const index = list.findIndex((template) => template.id === id);
+  if (index >= 0) {
+    list[index] = {
+      ...list[index],
+      assetIndex: Math.max(1, Number(list[index].assetIndex || current.chanjingAssetIndex || 1)),
+      config: captureTemplate(current)
+    };
+  }
+  templates[account] = list;
+  settings.accountTemplates = templates;
+  return templates;
+}
+
+function collectSettings() {
+  const next = collectSettingsBase();
+  next.chanjingAccounts = normalizeAccounts(settings.chanjingAccounts);
+  next.chanjingAssetOverrides = normalizeAssetOverrides(settings.chanjingAssetOverrides);
+  next.accountTemplates = normalizeAccountTemplates(settings.accountTemplates);
+  next.chanjingAccountIndex = next.chanjingAccounts.length
+    ? clampNumber(Number(next.chanjingAccountIndex || settings.chanjingAccountIndex || 1), 1, next.chanjingAccounts.length)
+    : 0;
+  next.runChanjingAccountIndex = next.chanjingAccounts.length
+    ? clampNumber(
+      Number(next.runChanjingAccountIndex || settings.runChanjingAccountIndex || next.chanjingAccountIndex || 1),
+      1,
+      next.chanjingAccounts.length
+    )
+    : 0;
+  next.runRandomAccountIndexes = normalizeAccountIndexList(next.runRandomAccountIndexes, next.runChanjingAccountIndex).join(',');
+  next.runRotateAccountIndexes = normalizeAccountIndexList(next.runRotateAccountIndexes, next.runRandomAccountIndexes).join(',');
+  next.assetSelectionMode = normalizeAssetSelectionMode(next.assetSelectionMode || settings.assetSelectionMode);
   requiredClipFields.forEach((field) => {
     next[field] = true;
   });
@@ -443,6 +1083,14 @@ function collectSettings() {
     .filter((id) => textEffectIds.includes(id));
   next.pipRules = collectPipRules();
   next.textEffectKeywordRules = collectTextEffectKeywordRules();
+  next.previewVisibleObjects = [...previewVisibleKinds];
+  next.accountTemplates = next.chanjingAccountIndex && next.currentTemplateId
+    ? stashCurrentTemplate(next.chanjingAccountIndex, next.currentTemplateId, next)
+    : normalizeAccountTemplates(settings.accountTemplates);
+  const activeTemplate = templateById(next.chanjingAccountIndex, next.currentTemplateId, true);
+  if (activeTemplate) {
+    next.chanjingAssetIndex = activeTemplate.assetIndex;
+  }
   next.clipPreset = clipPresetFromFlags(next);
   next.sfxMode = next.useSfxFile ? 'fixed' : 'random';
   return next;
@@ -450,12 +1098,55 @@ function collectSettings() {
 
 function fillSettings(value) {
   settings = { ...(value || {}) };
+  settings.chanjingAccounts = normalizeAccounts(settings.chanjingAccounts);
+  settings.chanjingAssetOverrides = normalizeAssetOverrides(settings.chanjingAssetOverrides);
+  settings.accountTemplates = migrateLegacyAccountTemplates(settings.accountTemplates, settings.accountAssetTemplates);
+  const accountTotal = settings.chanjingAccounts.length;
+  settings.chanjingAccountIndex = accountTotal
+    ? clampNumber(Number(settings.chanjingAccountIndex || 1), 1, accountTotal)
+    : 0;
+  settings.runChanjingAccountIndex = accountTotal
+    ? clampNumber(Number(settings.runChanjingAccountIndex || settings.chanjingAccountIndex || 1), 1, accountTotal)
+    : 0;
+  settings.runRandomAccountIndexes = normalizeAccountIndexList(settings.runRandomAccountIndexes, settings.runChanjingAccountIndex).join(',');
+  settings.runRotateAccountIndexes = normalizeAccountIndexList(settings.runRotateAccountIndexes, settings.runRandomAccountIndexes).join(',');
+  const templateAccount = firstAccountWithEnabledTemplate();
+  if (
+    accountTotal
+    && templateAccount
+    && templateAccount <= accountTotal
+    && !selectedTemplate(settings.chanjingAccountIndex)
+  ) {
+    settings.chanjingAccountIndex = templateAccount;
+    settings.runChanjingAccountIndex = templateAccount;
+  }
+  settings.assetSelectionMode = normalizeAssetSelectionMode(settings.assetSelectionMode);
+  settings.accountAssetTemplates = normalizeTemplateMap(settings.accountAssetTemplates);
+  if (!defaultTemplateSnapshot) {
+    defaultTemplateSnapshot = captureTemplate(settings);
+  }
+  if (settings.chanjingAccountIndex) {
+    const currentTemplate = selectedTemplate(settings.chanjingAccountIndex);
+    settings.currentTemplateId = currentTemplate?.id || '';
+    if (currentTemplate) {
+      settings.chanjingAssetIndex = currentTemplate.assetIndex;
+    }
+    settings = {
+      ...settings,
+      ...templateForSelection(settings.chanjingAccountIndex, settings.currentTemplateId)
+    };
+  }
+  if (!settings.logoFile) {
+    settings.logoFile = defaultLogoFilePath(settings.bundlePath);
+  }
   settings.previewPipX = settings.previewPipX ?? settings.pipX;
   settings.previewPipY = settings.previewPipY ?? settings.pipY;
   settings.previewPipH = settings.previewPipH ?? settings.pipHeight;
   settings.previewPipW = Math.round(Number(settings.previewPipH || previewDefaults.pip.h) * pipAspectRatio);
   settings.pipRules = normalizePipRules(settings.pipRules);
   settings.textEffectKeywordRules = normalizeTextEffectKeywordRules(settings.textEffectKeywordRules);
+  previewVisibleKinds = new Set(previewObjectKinds);
+  settings.previewVisibleObjects = [...previewVisibleKinds];
   const selectedTextEffects = Array.isArray(settings.textEffectIds)
     ? settings.textEffectIds.filter((id) => textEffectIds.includes(id))
     : [...textEffectIds];
@@ -487,8 +1178,12 @@ function fillSettings(value) {
   renderPipRules(settings.pipRules);
   renderTextEffectKeywordRules(settings.textEffectKeywordRules);
   settings.textEffectIds = selectedTextEffects;
+  syncPreviewVisibilityControls();
+  syncPreviewStyleControls();
+  syncTemplateSelectionUi();
   syncPipFieldsFromPreview(false);
   syncClipConfigUi();
+  updateAssetSelectionModeUi();
   updatePreviewFonts();
   updatePreviewLayout();
   renderPreviewDisclaimer();
@@ -574,6 +1269,43 @@ function setPreviewBox(kind, box, updateControls = true) {
   }
 }
 
+function previewCenterOffsetX(box) {
+  return Math.round(box.x + box.w / 2 - previewCanvas.width / 2);
+}
+
+function syncPreviewStyleControls(targetId = '') {
+  document.querySelectorAll('[data-preview-style-target]').forEach((proxy) => {
+    if (targetId && proxy.dataset.previewStyleTarget !== targetId) return;
+    const source = $(proxy.dataset.previewStyleTarget);
+    if (!source) return;
+    if (proxy.type === 'checkbox') {
+      proxy.checked = Boolean(source.checked);
+    } else {
+      proxy.value = source.value ?? '';
+    }
+  });
+}
+
+function applyPreviewStyleProxy(proxy) {
+  const target = proxy?.dataset?.previewStyleTarget;
+  const source = target ? $(target) : null;
+  if (!source) return;
+  if (proxy.type === 'checkbox') {
+    source.checked = Boolean(proxy.checked);
+  } else {
+    source.value = proxy.value;
+  }
+  syncPreviewStyleControls(target);
+  if (target.toLowerCase().includes('fontpath')) {
+    updatePreviewFonts();
+  }
+  if (target === 'logoFile' || target === 'useLogoFile' || target === 'logoOpacityPercent') {
+    updatePreviewLogo();
+  }
+  applyPreviewTextStyle();
+  schedulePreviewLayoutUpdate();
+}
+
 function updatePipStyleFieldsFromBox(box) {
   const values = {
     pipX: box.x,
@@ -602,7 +1334,11 @@ function schedulePreviewLayoutUpdate() {
 function previewTextFont(kind, size) {
   const family = kind === 'title'
     ? 'PreviewTitleFont, "Microsoft YaHei UI", sans-serif'
-    : 'PreviewCaptionFont, "Microsoft YaHei UI", sans-serif';
+    : kind === 'textEffect'
+      ? 'PreviewTextEffectFont, "Microsoft YaHei UI", sans-serif'
+      : kind === 'disclaimer'
+        ? 'PreviewDisclaimerFont, "Microsoft YaHei UI", sans-serif'
+        : 'PreviewCaptionFont, "Microsoft YaHei UI", sans-serif';
   return `900 ${Math.max(1, Math.round(size))}px ${family}`;
 }
 
@@ -622,6 +1358,37 @@ function fitPreviewAssFontSize(lines, maxSize, minSize, maxWidth, kind) {
     if (visible.every((line) => previewTextWidth(line, size, kind) <= maxWidth)) {
       return size;
     }
+  }
+  return minSize;
+}
+
+function previewElementLines(el) {
+  return String(el?.innerText || el?.textContent || '')
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function previewOutlineForKind(kind) {
+  if (kind === 'title') {
+    return Number($('titleTopOutlineSize')?.value || settings.titleTopOutlineSize || 0);
+  }
+  if (kind === 'disclaimer') {
+    return Number($('disclaimerOutlineSize')?.value || settings.disclaimerOutlineSize || 0);
+  }
+  return Number($('captionOutlineSize')?.value || settings.captionOutlineSize || 0);
+}
+
+function fitPreviewBoxFontSize(el, box, maxSize, minSize, kind, lineHeightRatio = 1.16) {
+  const visible = previewElementLines(el);
+  if (!visible.length) return maxSize;
+  const outline = Math.max(0, previewOutlineForKind(kind));
+  const usableWidth = Math.max(24, box.w - outline * 2 - 28);
+  const usableHeight = Math.max(24, box.h - outline * 2 - 14);
+  for (let size = Math.round(maxSize); size >= minSize; size -= 2) {
+    const fitsWidth = visible.every((line) => previewTextWidth(line, size, kind) <= usableWidth);
+    const fitsHeight = visible.length * size * lineHeightRatio <= usableHeight;
+    if (fitsWidth && fitsHeight) return size;
   }
   return minSize;
 }
@@ -658,11 +1425,17 @@ function applyPreviewBox(kind, box) {
     middle.style.fontSize = `${middleSize * scale}px`;
     bottom.style.fontSize = `${bottomSize * scale}px`;
   } else if (kind === 'caption') {
-    el.style.fontSize = `${clampNumber(box.h * 0.44, 48, 128) * scale}px`;
+    const maxSize = clampNumber(box.h * 0.44, 48, 128);
+    const size = fitPreviewBoxFontSize($('previewCaptionText'), box, maxSize, 18, 'caption', 1.22);
+    el.style.fontSize = `${size * scale}px`;
   } else if (kind === 'textEffect') {
-    el.style.fontSize = `${clampNumber(box.h * 0.44, 48, 128) * scale}px`;
+    const maxSize = clampNumber(box.h * 0.44, 48, 128);
+    const size = fitPreviewBoxFontSize($('previewTextEffectText'), box, maxSize, 18, 'textEffect', 1.12);
+    el.style.fontSize = `${size * scale}px`;
   } else if (kind === 'disclaimer') {
-    el.style.fontSize = `${clampNumber(box.h * 0.29, 24, 64) * scale}px`;
+    const maxSize = clampNumber(box.h * 0.29, 24, 64);
+    const size = fitPreviewBoxFontSize($('previewDisclaimerText'), box, maxSize, 12, 'disclaimer', 1.2);
+    el.style.fontSize = `${size * scale}px`;
   }
 }
 
@@ -676,11 +1449,12 @@ function updatePreviewLayout() {
 
 function fillPreviewCurrentControls(kind = $('previewObject')?.value || 'title') {
   const box = getPreviewBox(kind);
-  const mapping = { X: 'previewCurrentX', Y: 'previewCurrentY', W: 'previewCurrentW', H: 'previewCurrentH' };
-  for (const [suffix, id] of Object.entries(mapping)) {
-    const el = $(id);
-    if (el) el.value = String(box[suffix.toLowerCase()]);
-  }
+  const offset = $('previewCurrentCenterOffsetX');
+  if (offset) offset.value = String(previewCenterOffsetX(box));
+  const width = $('previewCurrentW');
+  if (width) width.value = String(box.w);
+  const height = $('previewCurrentH');
+  if (height) height.value = String(box.h);
   if ($('previewCurrentW')) {
     $('previewCurrentW').disabled = Boolean(previewDefaults[kind]?.fixedAspect);
   }
@@ -688,21 +1462,40 @@ function fillPreviewCurrentControls(kind = $('previewObject')?.value || 'title')
 
 function updateSelectedPreviewBoxFromControls() {
   const kind = $('previewObject')?.value || 'title';
+  const current = getPreviewBox(kind);
+  const h = Number($('previewCurrentH')?.value || current.h);
+  const w = previewDefaults[kind]?.fixedAspect
+    ? Math.round(h * previewDefaults[kind].fixedAspect)
+    : Number($('previewCurrentW')?.value || current.w);
+  const offset = Number($('previewCurrentCenterOffsetX')?.value || 0);
   setPreviewBox(kind, {
-    x: Number($('previewCurrentX')?.value || 0),
-    y: Number($('previewCurrentY')?.value || 0),
-    w: Number($('previewCurrentW')?.value || 0),
-    h: Number($('previewCurrentH')?.value || 0)
+    x: Math.round(previewCanvas.width / 2 + offset - w / 2),
+    y: current.y,
+    w,
+    h
   }, false);
+  fillPreviewCurrentControls(kind);
 }
 
 function selectPreviewBox(kind) {
   if (!$('previewObject')) return;
+  if (!previewVisibleKinds.has(kind)) {
+    kind = [...previewVisibleKinds][0] || 'title';
+  }
   $('previewObject').value = kind;
+  Array.from($('previewObject').options).forEach((option) => {
+    option.disabled = !previewVisibleKinds.has(option.value);
+  });
   document.querySelectorAll('[data-preview-box]').forEach((el) => {
-    el.classList.toggle('selected', el.dataset.previewBox === kind);
+    const visible = previewVisibleKinds.has(el.dataset.previewBox);
+    el.hidden = !visible;
+    el.classList.toggle('selected', visible && el.dataset.previewBox === kind);
+  });
+  document.querySelectorAll('[data-preview-style-panel]').forEach((panel) => {
+    panel.hidden = panel.dataset.previewStylePanel !== kind;
   });
   fillPreviewCurrentControls(kind);
+  updatePreviewLogo();
 }
 
 function fileUrl(value) {
@@ -800,6 +1593,28 @@ function applyPreviewTextStyle() {
     disclaimer.style.opacity = String(opacity);
     applyPreviewOutline(disclaimer, $('disclaimerOutlineSize')?.value || settings.disclaimerOutlineSize, $('disclaimerOutlineColor')?.value || settings.disclaimerOutlineColor);
   }
+  updatePreviewLogo();
+}
+
+function updatePreviewLogo() {
+  const box = $('previewLogoBox');
+  const image = $('previewLogoImage');
+  const placeholder = $('previewLogoPlaceholder');
+  if (!box || !image || !placeholder) return;
+  const useSpecified = $('useLogoFile') ? $('useLogoFile').checked : settings.useLogoFile !== false;
+  const file = useSpecified ? ($('logoFile')?.value || settings.logoFile || '') : '';
+  const opacity = clampNumber(Number($('logoOpacityPercent')?.value || settings.logoOpacityPercent || 100), 0, 100) / 100;
+  image.style.opacity = String(opacity);
+  placeholder.style.opacity = String(opacity);
+  if (file) {
+    image.src = fileUrl(file);
+    image.hidden = false;
+    placeholder.hidden = true;
+  } else {
+    image.hidden = true;
+    image.removeAttribute('src');
+    placeholder.hidden = false;
+  }
 }
 
 function firstPreviewItem() {
@@ -811,7 +1626,7 @@ function generatePreviewTitle() {
   const item = firstPreviewItem();
   const editor = item ? titleEditorForIndex(item.index) : null;
   const titleText = editor?.value || (item?.titleLines?.length ? item.titleLines.join('\n') : '');
-  const lines = titleLinesFromText(titleText || '糖尿病花钱多\n药也越来越多\n先看原因');
+  const lines = titleLinesFromText(titleText || '糖尿病血糖高\n胰岛要先看\n今天讲明白');
   const padded = [...lines, '', '', ''];
   const titleBox = $('previewTitleBox');
   if (!titleBox) return;
@@ -834,7 +1649,7 @@ function cleanPreviewCaptionLine(text) {
 
 function generatePreviewCaption() {
   const item = firstPreviewItem();
-  const content = contentForItem(item) || '很多糖友嘴上不说，其实最担心的是花钱多。';
+  const content = contentForItem(item) || '很多糖友一看血糖高，就问是不是药不够。';
   const sentences = splitPreviewSentences(content);
   const sentence = sentences[3] || sentences[0] || content;
   const parts = sentence
@@ -851,6 +1666,1529 @@ function renderPreviewDisclaimer() {
   const target = $('previewDisclaimerText');
   if (target) target.innerHTML = text.split('\n').map(escapeHtml).join('<br />');
   schedulePreviewLayoutUpdate();
+}
+
+function clearPreviewBackground() {
+  const bg = $('previewVideoBg');
+  const image = $('previewBgImage');
+  const video = $('previewBgVideo');
+  bg?.classList.remove('has-media');
+  if (image) {
+    image.hidden = true;
+    image.removeAttribute('src');
+  }
+  if (video) {
+    video.hidden = true;
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+  }
+}
+
+function applyPreviewBackground(source) {
+  const bg = $('previewVideoBg');
+  const image = $('previewBgImage');
+  const video = $('previewBgVideo');
+  if (!bg || !image || !video || !source?.url) {
+    clearPreviewBackground();
+    return;
+  }
+
+  image.hidden = true;
+  video.hidden = true;
+  image.removeAttribute('src');
+  video.removeAttribute('src');
+  bg.classList.add('has-media');
+
+  if (source.kind === 'image') {
+    image.onerror = clearPreviewBackground;
+    image.src = source.url;
+    image.hidden = false;
+    return;
+  }
+
+  video.onloadedmetadata = () => {
+    try {
+      video.currentTime = Math.min(0.2, Math.max(0, Number(video.duration || 0) - 0.1));
+    } catch (_error) {
+      video.pause();
+    }
+  };
+  video.onseeked = () => video.pause();
+  video.onerror = clearPreviewBackground;
+  video.src = source.url;
+  video.hidden = false;
+}
+
+async function refreshPreviewBackground() {
+  if (!window.huApp?.getPreviewBackground) return;
+  try {
+    const source = await window.huApp.getPreviewBackground({
+      settings: collectSettings(),
+      inputJsonPath
+    });
+    applyPreviewBackground(source);
+  } catch (_error) {
+    clearPreviewBackground();
+  }
+}
+
+function selectedChanjingAssetFromList() {
+  const index = Number(settings.chanjingAssetIndex || $('chanjingAssetIndex')?.value || 1);
+  return chanjingAssets.find((asset) => Number(asset.index) === index && asset.enabled !== false) || null;
+}
+
+function assetSortNumber(asset) {
+  const text = digitalAssetName(asset);
+  const match = text.match(/\d+/);
+  if (match) return Number(match[0]);
+  const index = Number(asset?.index);
+  return Number.isFinite(index) ? index : Number.MAX_SAFE_INTEGER;
+}
+
+function sortedChanjingAssets(value = chanjingAssets) {
+  const collator = new Intl.Collator('zh-Hans-CN', { numeric: true, sensitivity: 'base' });
+  return [...(Array.isArray(value) ? value : [])].sort((a, b) => {
+    const numberDiff = assetSortNumber(a) - assetSortNumber(b);
+    if (numberDiff) return numberDiff;
+    const nameDiff = collator.compare(digitalAssetName(a), digitalAssetName(b));
+    if (nameDiff) return nameDiff;
+    return Number(a?.index || 0) - Number(b?.index || 0);
+  });
+}
+
+function enabledChanjingAssets() {
+  return sortedChanjingAssets(chanjingAssets);
+}
+
+function enabledAssetByIndex(index) {
+  return enabledChanjingAssets().find((asset) => Number(asset.index) === Number(index)) || null;
+}
+
+function digitalAssetName(asset) {
+  if (!asset) return '人物模板';
+  return String(asset.detailLabel || asset.name || asset.label || `人物模板${asset.index}`).trim() || `人物模板${asset.index}`;
+}
+
+function renderTemplateSourceAssetOptions() {
+  const select = $('templateSourceAssetIndex');
+  if (!select) return;
+  const current = String(settings.templateSourceAssetIndex || select.value || settings.chanjingAssetIndex || '1');
+  const assets = enabledChanjingAssets();
+  select.innerHTML = '';
+  if (!assets.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = '未找到人物模板';
+    select.appendChild(option);
+    select.value = '';
+    select.disabled = true;
+    const addButton = $('btnAssetManagerAddTemplate');
+    if (addButton) addButton.disabled = true;
+    return;
+  }
+  assets.forEach((asset) => {
+    const option = document.createElement('option');
+    option.value = String(asset.index);
+    option.textContent = digitalAssetName(asset);
+    select.appendChild(option);
+  });
+  select.value = assets.some((asset) => String(asset.index) === current) ? current : String(assets[0].index);
+  select.disabled = false;
+  settings.templateSourceAssetIndex = Number(select.value || 0);
+}
+
+function renderAssetManagerSourceAssetOptions() {
+  const select = $('assetManagerSourceAssetIndex');
+  if (!select) return;
+  const current = String(select.value || settings.templateSourceAssetIndex || settings.chanjingAssetIndex || '');
+  const assets = enabledChanjingAssets();
+  select.innerHTML = '';
+  if (!assets.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = '未找到人物模板';
+    select.appendChild(option);
+    select.value = '';
+    select.disabled = true;
+    updateAssetManagerSourcePreview();
+    updateAssetManagerAddButtonState();
+    return;
+  }
+  assets.forEach((asset) => {
+    const option = document.createElement('option');
+    option.value = String(asset.index);
+    option.textContent = digitalAssetName(asset);
+    select.appendChild(option);
+  });
+  select.value = assets.some((asset) => String(asset.index) === current)
+    ? current
+    : String(assets[0].index);
+  select.disabled = false;
+  updateAssetManagerSourcePreview();
+  updateAssetManagerAddButtonState();
+}
+
+function selectedAssetManagerSourceAsset() {
+  const value = String($('assetManagerSourceAssetIndex')?.value || '');
+  const index = Number(value || 0);
+  return enabledAssetByIndex(index);
+}
+
+function isAssetManagerAllAssetsSelection() {
+  return false;
+}
+
+function clearAssetManagerSourcePreview() {
+  const image = $('assetManagerPreviewImage');
+  const video = $('assetManagerPreviewVideo');
+  const placeholder = $('assetManagerPreviewPlaceholder');
+  if (image) {
+    image.hidden = true;
+    image.removeAttribute('src');
+  }
+  if (video) {
+    video.hidden = true;
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+  }
+  if (placeholder) {
+    placeholder.textContent = '选择模板人物形象后预览';
+    placeholder.hidden = false;
+  }
+}
+
+function updateAssetManagerSourcePreview() {
+  const asset = selectedAssetManagerSourceAsset();
+  const name = $('assetManagerPreviewName');
+  const meta = $('assetManagerPreviewMeta');
+  const image = $('assetManagerPreviewImage');
+  const video = $('assetManagerPreviewVideo');
+  const placeholder = $('assetManagerPreviewPlaceholder');
+  clearAssetManagerSourcePreview();
+  if (name) name.textContent = asset ? digitalAssetName(asset) : '未选择模板人物形象';
+  if (meta) {
+    meta.textContent = asset
+      ? `人物模板${asset.index}${asset.file ? ` · ${asset.file}` : ''}`
+      : '先看预览，再确认是否添加为模板。';
+  }
+  if (!asset) {
+    updateAssetManagerAddButtonState();
+    return;
+  }
+  if (placeholder) placeholder.textContent = '选择模板人物形象后预览';
+  if (asset.pic_url && image) {
+    image.src = asset.pic_url;
+    image.hidden = false;
+    if (placeholder) placeholder.hidden = true;
+    updateAssetManagerAddButtonState();
+    return;
+  }
+  if (asset.preview_url && video) {
+    video.src = asset.preview_url;
+    video.hidden = false;
+    video.muted = true;
+    video.onloadedmetadata = () => {
+      try {
+        video.currentTime = Math.min(0.2, Math.max(0, Number(video.duration || 0) - 0.1));
+      } catch (_error) {
+        video.pause();
+      }
+    };
+    video.onseeked = () => video.pause();
+    if (placeholder) placeholder.hidden = true;
+  }
+  updateAssetManagerAddButtonState();
+}
+
+function assetManagerHintElement() {
+  if ($('assetAddAllModal') && !$('assetAddAllModal').hidden) return $('assetAddAllHint');
+  return $('assetAddModal') && !$('assetAddModal').hidden ? $('assetAddHint') : $('assetModalHint');
+}
+
+function openAddTemplateModal() {
+  if ($('assetModal')) {
+    $('assetModal').hidden = true;
+  }
+  if (settings.currentTemplateId) {
+    stashCurrentTemplate();
+  }
+  templateManagerDraftConfigs = new Map();
+  templateManagerDraftAccounts = normalizeAccountManagerEntries(settings.chanjingAccounts);
+  templateManagerAccountIndex = settings.chanjingAccountIndex || firstAccountWithEnabledTemplate() || (templateManagerDraftAccounts.length ? 1 : 0);
+  renderAssetManager();
+  renderAssetManagerSourceAssetOptions();
+  renderAssetManagerTemplateAccountOptions(String(templateManagerAccountIndex || ''));
+  updateAssetManagerSourcePreview();
+  const hint = $('assetAddHint');
+  if (hint) hint.textContent = '选择模板人物形象和归属账号，确认后会自动保存并返回模板预览。';
+  $('assetAddModal').hidden = false;
+  updateAssetManagerAddButtonState();
+}
+
+function closeAddTemplateModal() {
+  clearAssetManagerSourcePreview();
+  setAssetManagerNewAccountOpen(false);
+  $('assetAddModal').hidden = true;
+  $('assetAddAllModal').hidden = true;
+  templateManagerDraftConfigs = new Map();
+  templateManagerDraftAccounts = [];
+  updateAssetManagerAddButtonState();
+}
+
+function templateOptionsHtml(selectedId, accountIndex = settings.runChanjingAccountIndex || settings.chanjingAccountIndex) {
+  const templates = accountTemplateList(accountIndex, false);
+  if (!templates.length) {
+    return '<option value="">没有可用模板</option>';
+  }
+  const selected = String(selectedId || settings.currentTemplateId || templates[0].id);
+  return templates.map((template) => {
+    return `<option value="${escapeHtml(template.id)}"${template.id === selected ? ' selected' : ''}>${escapeHtml(template.name)}</option>`;
+  }).join('');
+}
+
+function defaultRowTemplateId() {
+  const templates = accountTemplateList(settings.runChanjingAccountIndex || settings.chanjingAccountIndex, false);
+  if (templates.some((template) => template.id === settings.currentTemplateId)) return settings.currentTemplateId;
+  return templates[0]?.id || '';
+}
+
+function rowAssetOptionsHtml(selectedId) {
+  const choices = allTemplateChoices();
+  if (!choices.length) {
+    return '<option value="">没有可用模板</option>';
+  }
+  const fallback = defaultRowTemplateSelection() || templateChoiceValue(choices[0].accountIndex, choices[0].template.id);
+  const selected = templateChoiceByValue(selectedId) ? String(selectedId) : fallback;
+  return choices.map(({ accountIndex, template }) => {
+    const value = templateChoiceValue(accountIndex, template.id);
+    const label = `${accountName(accountIndex)}-${template.name}`;
+    return `<option value="${escapeHtml(value)}"${value === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+  }).join('');
+}
+
+function renderTemplateOptions() {
+  const select = $('currentTemplateId');
+  if (!select) return;
+  const templates = accountTemplateList(settings.chanjingAccountIndex, false);
+  const current = String(settings.currentTemplateId || select.value || '');
+  select.innerHTML = '';
+  if (!templates.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = '请添加模板';
+    select.appendChild(option);
+    select.value = '';
+    select.disabled = true;
+    settings.currentTemplateId = '';
+    settings.chanjingAssetIndex = 0;
+    const hiddenAsset = $('chanjingAssetIndex');
+    if (hiddenAsset) hiddenAsset.value = '';
+    return;
+  }
+  templates.forEach((template) => {
+    const option = document.createElement('option');
+    option.value = template.id;
+    option.textContent = template.name;
+    select.appendChild(option);
+  });
+  select.value = templates.some((template) => template.id === current) ? current : templates[0].id;
+  select.disabled = false;
+  settings.currentTemplateId = select.value;
+  const template = templateById(settings.chanjingAccountIndex, select.value, false);
+  settings.chanjingAssetIndex = Number(template?.assetIndex || 0);
+  const hiddenAsset = $('chanjingAssetIndex');
+  if (hiddenAsset) hiddenAsset.value = settings.chanjingAssetIndex ? String(settings.chanjingAssetIndex) : '';
+}
+
+function rowTemplateName(templateId, accountIndex = settings.runChanjingAccountIndex || settings.chanjingAccountIndex) {
+  const choice = templateChoiceByValue(templateId);
+  if (choice) return `${accountName(choice.accountIndex)}-${choice.template.name}`;
+  const template = templateById(accountIndex, templateId, true);
+  return template ? `${accountName(accountIndex)}-${template.name}` : '';
+}
+
+function defaultRowTemplateSelection() {
+  const account = settings.runChanjingAccountIndex || settings.chanjingAccountIndex;
+  const template = templateById(account, defaultRowTemplateId(), false);
+  if (template) return templateChoiceValue(account, template.id);
+  const first = allTemplateChoices()[0];
+  return first ? templateChoiceValue(first.accountIndex, first.template.id) : '';
+}
+
+function legacyAssetOptionHtml(selectedIndex) {
+  const enabled = enabledChanjingAssets();
+  if (!enabled.length) {
+    return '<option value="">没有人物模板</option>';
+  }
+  const selected = Number(selectedIndex || settings.chanjingAssetIndex || enabled[0].index);
+  return enabled.map((asset) => {
+    const value = Number(asset.index);
+    const label = templateDisplayName(asset, value);
+    return `<option value="${value}"${value === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+  }).join('');
+}
+
+function currentAssetSelectionMode() {
+  return normalizeAssetSelectionMode($('assetSelectionMode')?.value || settings.assetSelectionMode);
+}
+
+function normalizeAccountIndexList(value, fallback = []) {
+  const count = accountCount();
+  const raw = Array.isArray(value)
+    ? value
+    : String(value || '')
+      .split(/[,，\s]+/)
+      .filter(Boolean);
+  const list = raw
+    .map((item) => Number(item))
+    .filter((index) => Number.isFinite(index) && index >= 1 && index <= count);
+  const unique = [...new Set(list)];
+  if (unique.length) return unique;
+  const fallbackList = (Array.isArray(fallback) ? fallback : [fallback])
+    .map((item) => Number(item))
+    .filter((index) => Number.isFinite(index) && index >= 1 && index <= count);
+  return [...new Set(fallbackList)].length ? [...new Set(fallbackList)] : (count ? [1] : []);
+}
+
+function accountIndexesText(indexes) {
+  const names = normalizeAccountIndexList(indexes).map((index) => accountName(index));
+  if (!names.length) return '未选择账号';
+  return names.length > 2 ? `${names.slice(0, 2).join('、')} 等 ${names.length} 个账号` : names.join('、');
+}
+
+function selectedRunAccountIndexes(kind = 'random') {
+  const selector = kind === 'rotate' ? '[data-run-rotate-account]:checked' : '[data-run-random-account]:checked';
+  const allSelector = kind === 'rotate' ? '[data-run-rotate-account]' : '[data-run-random-account]';
+  const checked = Array.from(document.querySelectorAll(selector)).map((input) => Number(input.value));
+  const field = kind === 'rotate' ? 'runRotateAccountIndexes' : 'runRandomAccountIndexes';
+  const fallback = kind === 'rotate'
+    ? settings.runRotateAccountIndexes || settings.runRandomAccountIndexes || settings.runChanjingAccountIndex
+    : settings.runRandomAccountIndexes || settings.runChanjingAccountIndex;
+  const selected = normalizeAccountIndexList(checked.length ? checked : settings[field], fallback);
+  const boxes = Array.from(document.querySelectorAll(allSelector));
+  if (boxes.length && !checked.length && selected.length) {
+    boxes.forEach((input) => {
+      input.checked = selected.includes(Number(input.value));
+    });
+  }
+  return selected;
+}
+
+function syncRunAccountHiddenFields() {
+  const randomIndexes = selectedRunAccountIndexes('random');
+  const rotateIndexes = selectedRunAccountIndexes('rotate');
+  const randomField = $('runRandomAccountIndexes');
+  const rotateField = $('runRotateAccountIndexes');
+  const accountField = $('runChanjingAccountIndex');
+  if (randomField) randomField.value = randomIndexes.join(',');
+  if (rotateField) rotateField.value = rotateIndexes.join(',');
+  if (accountField) accountField.value = String(randomIndexes[0] || rotateIndexes[0] || settings.chanjingAccountIndex || 1);
+  settings.runRandomAccountIndexes = randomIndexes.join(',');
+  settings.runRotateAccountIndexes = rotateIndexes.join(',');
+  settings.runChanjingAccountIndex = Number(accountField?.value || 1);
+}
+
+function setTemplateSelectionOpen(open) {
+  const menu = $('templateSelectionMenu');
+  const button = $('templateSelectionButton');
+  if (!menu || !button) return;
+  menu.hidden = !open;
+  button.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function toggleTemplateSelectionOpen() {
+  setTemplateSelectionOpen(Boolean($('templateSelectionMenu')?.hidden));
+}
+
+function syncTemplateSelectionUi() {
+  const mode = currentAssetSelectionMode();
+  const hidden = $('assetSelectionMode');
+  if (hidden) hidden.value = mode;
+  syncRunAccountHiddenFields();
+  document.querySelectorAll('[name="templateSelectionMode"]').forEach((input) => {
+    input.checked = input.value === mode;
+  });
+  const locked = Boolean($('templateSelectionButton')?.disabled);
+  document.querySelectorAll('[data-run-random-account]').forEach((input) => {
+    input.disabled = locked || mode !== 'random_account' || !accountCount();
+  });
+  document.querySelectorAll('[data-run-rotate-account]').forEach((input) => {
+    input.disabled = locked || mode !== 'rotate_account' || !accountCount();
+  });
+  const text = $('templateSelectionText');
+  if (text) {
+    if (mode === 'random_account') {
+      text.textContent = '模板选择方式：指定账号随机模板';
+    } else if (mode === 'rotate_account') {
+      text.textContent = '模板选择方式：指定账号轮换模板';
+    } else {
+      text.textContent = '模板选择方式：所有账号所有模板全部随机';
+    }
+  }
+}
+
+function templateChoicesForSelectionMode(mode = currentAssetSelectionMode()) {
+  if (mode === 'random_account' || mode === 'rotate_account') {
+    const kind = mode === 'rotate_account' ? 'rotate' : 'random';
+    return selectedRunAccountIndexes(kind).flatMap((accountIndex) => (
+      accountTemplateList(accountIndex, false).map((template) => ({ accountIndex, template }))
+    ));
+  }
+  return allTemplateChoices();
+}
+
+function handleTemplateSelectionModeChange() {
+  const checked = document.querySelector('[name="templateSelectionMode"]:checked');
+  const mode = normalizeAssetSelectionMode(checked?.value || settings.assetSelectionMode);
+  const hidden = $('assetSelectionMode');
+  if (hidden) hidden.value = mode;
+  settings.assetSelectionMode = mode;
+  syncRunAccountHiddenFields();
+  syncTemplateSelectionUi();
+  applyTemplateModeToRows(mode);
+}
+
+function updateAssetSelectionModeUi() {
+  document.querySelectorAll('[data-asset-column]').forEach((el) => {
+    el.hidden = false;
+  });
+  document.querySelectorAll('[data-row-template-id]').forEach((select) => {
+    select.disabled = rowIsLocked(Number(select.dataset.rowTemplateId || 0));
+  });
+}
+
+function updatePreviewSetupState() {
+  const ready = enabledTemplateCount() > 0;
+  const missing = $('previewMissingState');
+  const scroll = document.querySelector('#section-preview .preview-scroll');
+  const footer = document.querySelector('#section-preview .preview-footer');
+  if (missing) {
+    missing.hidden = ready;
+  }
+  if (scroll) scroll.hidden = !ready;
+  if (footer) footer.hidden = !ready;
+  if (ready) {
+    schedulePreviewLayoutUpdate();
+  }
+}
+
+function renderRowTemplateControls() {
+  const fallback = defaultRowTemplateSelection();
+  document.querySelectorAll('[data-row-template-id]').forEach((select) => {
+    const previous = String(select.value || select.dataset.selectedAsset || fallback);
+    const selected = templateChoiceByValue(previous) ? previous : fallback;
+    select.innerHTML = rowAssetOptionsHtml(selected);
+    select.value = selected || '';
+  });
+  updateAssetSelectionModeUi();
+  updatePreviewSetupState();
+}
+
+function applyTemplateModeToRows(mode = currentAssetSelectionMode()) {
+  mode = normalizeAssetSelectionMode(mode);
+  const choices = templateChoicesForSelectionMode(mode);
+  if (!choices.length) {
+    renderRowTemplateControls();
+    syncTemplateSelectionUi();
+    return;
+  }
+  const selects = Array.from(document.querySelectorAll('[data-row-template-id]'));
+  if (!selects.length) return;
+  renderRowTemplateControls();
+  const refreshed = Array.from(document.querySelectorAll('[data-row-template-id]'));
+  let rotateOffset = 0;
+  refreshed.forEach((select) => {
+    if (rowIsLocked(Number(select.dataset.rowTemplateId || 0))) return;
+    const choice = mode === 'rotate_account'
+      ? choices[rotateOffset++ % choices.length]
+      : choices[Math.floor(Math.random() * choices.length)];
+    select.value = templateChoiceValue(choice.accountIndex, choice.template.id);
+  });
+  updateAssetSelectionModeUi();
+  syncTemplateSelectionUi();
+}
+
+function updateChanjingAssetHint() {
+  const hint = $('chanjingAssetHint');
+  if (!hint) return;
+  if (!accountCount()) {
+    hint.textContent = '请先添加账号。';
+    return;
+  }
+  const templates = accountTemplateList(settings.chanjingAccountIndex, false);
+  if (!templates.length) {
+    hint.textContent = '请先选择模板人物形象并添加模板。';
+    return;
+  }
+  const template = selectedTemplate(settings.chanjingAccountIndex);
+  const asset = enabledAssetByIndex(template?.assetIndex);
+  const account = Number($('chanjingAccountIndex')?.value || settings.chanjingAccountIndex || 1);
+  hint.textContent = `${accountName(account)} × ${template?.name || '模板'}${asset ? ` · ${digitalAssetName(asset)}` : ''}；当前账号共 ${templates.length} 个模板`;
+}
+
+function renderChanjingAccountOptions() {
+  const select = $('chanjingAccountIndex');
+  if (!select) return;
+  const current = String(settings.chanjingAccountIndex || select.value || '1');
+  const accounts = normalizeAccounts(settings.chanjingAccounts);
+  settings.chanjingAccounts = accounts;
+  select.innerHTML = '';
+  if (!accounts.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = '请添加账号';
+    select.appendChild(option);
+    select.value = '';
+    select.disabled = true;
+    settings.chanjingAccountIndex = 0;
+    updatePreviewSetupState();
+    return;
+  }
+  select.disabled = false;
+  accounts.forEach((account, index) => {
+    const option = document.createElement('option');
+    option.value = String(index + 1);
+    option.textContent = account.name || `账号${index + 1}`;
+    select.appendChild(option);
+  });
+  select.value = Number(current) >= 1 && Number(current) <= accounts.length ? current : '1';
+  settings.chanjingAccountIndex = Number(select.value || 1);
+  updatePreviewSetupState();
+}
+
+function renderRunAccountOptions() {
+  const randomList = $('runRandomAccountList');
+  const rotateList = $('runRotateAccountList');
+  const accountField = $('runChanjingAccountIndex');
+  const accounts = normalizeAccounts(settings.chanjingAccounts);
+  if (!randomList || !rotateList || !accountField) return;
+  const randomSelected = normalizeAccountIndexList(settings.runRandomAccountIndexes, settings.runChanjingAccountIndex || settings.chanjingAccountIndex || 1);
+  const rotateSelected = normalizeAccountIndexList(settings.runRotateAccountIndexes, randomSelected);
+  randomList.innerHTML = '';
+  rotateList.innerHTML = '';
+  if (!accounts.length) {
+    randomList.innerHTML = '<span class="muted">请添加账号</span>';
+    rotateList.innerHTML = '<span class="muted">请添加账号</span>';
+    accountField.value = '';
+    settings.runChanjingAccountIndex = 0;
+    settings.runRandomAccountIndexes = '';
+    settings.runRotateAccountIndexes = '';
+    updatePreviewSetupState();
+    syncTemplateSelectionUi();
+    return;
+  }
+  accounts.forEach((account, offset) => {
+    const accountIndex = offset + 1;
+    const name = account.name || `账号${accountIndex}`;
+    const randomLabel = document.createElement('label');
+    randomLabel.innerHTML = `<input data-run-random-account type="checkbox" value="${accountIndex}" ${randomSelected.includes(accountIndex) ? 'checked' : ''} /><span>${escapeHtml(name)}</span>`;
+    const rotateLabel = document.createElement('label');
+    rotateLabel.innerHTML = `<input data-run-rotate-account type="checkbox" value="${accountIndex}" ${rotateSelected.includes(accountIndex) ? 'checked' : ''} /><span>${escapeHtml(name)}</span>`;
+    randomList.appendChild(randomLabel);
+    rotateList.appendChild(rotateLabel);
+  });
+  syncRunAccountHiddenFields();
+  updatePreviewSetupState();
+  syncTemplateSelectionUi();
+}
+
+function normalizeAccountManagerEntries(value = settings.chanjingAccounts) {
+  const source = Array.isArray(value) ? value : [];
+  return source.map((account, index) => {
+    const name = typeof account === 'string' ? account : account?.name;
+    const hasSourceIndex = account && typeof account === 'object' && Object.prototype.hasOwnProperty.call(account, 'sourceIndex');
+    return {
+      name: String(name || `账号${index + 1}`).trim() || `账号${index + 1}`,
+      sourceIndex: hasSourceIndex ? Number(account.sourceIndex || 0) : index + 1,
+      editing: Boolean(account?.editing)
+    };
+  });
+}
+
+function renderAccountManager(accounts = normalizeAccountManagerEntries()) {
+  const list = $('accountList');
+  if (!list) return;
+  const normalizedAccounts = normalizeAccountManagerEntries(accounts);
+  list.innerHTML = '';
+  if (!normalizedAccounts.length) {
+    list.innerHTML = '<p class="empty-account">请添加账号</p>';
+    const hint = $('accountModalHint');
+    if (hint) hint.textContent = '当前 0 个账号。';
+    return;
+  }
+  normalizedAccounts.forEach((account, index) => {
+    const editing = Boolean(account.editing);
+    const row = document.createElement('div');
+    row.className = 'account-row';
+    row.dataset.accountSourceIndex = String(account.sourceIndex || 0);
+    const label = document.createElement('span');
+    label.textContent = `账号${index + 1}`;
+
+    const nameCell = document.createElement('div');
+    nameCell.className = 'rename-name-cell';
+    const nameView = document.createElement('span');
+    nameView.className = 'rename-name-view';
+    nameView.dataset.accountNameView = 'true';
+    nameView.textContent = account.name || `账号${index + 1}`;
+    const input = document.createElement('input');
+    input.dataset.accountName = 'true';
+    input.value = account.name || `账号${index + 1}`;
+    input.placeholder = '账号名称';
+    input.hidden = !editing;
+    nameView.hidden = editing;
+    nameCell.appendChild(nameView);
+    nameCell.appendChild(input);
+
+    const rename = document.createElement('button');
+    rename.className = 'button secondary small-button rename-button';
+    rename.type = 'button';
+    rename.dataset.accountRename = 'true';
+    rename.textContent = editing ? '完成' : '重命名';
+
+    const remove = document.createElement('button');
+    remove.className = 'icon-button danger';
+    remove.type = 'button';
+    remove.dataset.accountRemove = String(index);
+    remove.title = '删除账号';
+    remove.textContent = '×';
+    row.appendChild(label);
+    row.appendChild(nameCell);
+    row.appendChild(rename);
+    row.appendChild(remove);
+    list.appendChild(row);
+  });
+  const hint = $('accountModalHint');
+  if (hint) hint.textContent = '账号名称会用于模板选择显示。';
+}
+
+function setAccountRenameEditing(row, editing) {
+  if (!row) return;
+  const rows = Array.from(document.querySelectorAll('#accountList .account-row'));
+  const index = rows.indexOf(row);
+  const fallback = `账号${index + 1 || rows.length + 1}`;
+  const input = row.querySelector('[data-account-name]');
+  const view = row.querySelector('[data-account-name-view]');
+  const button = row.querySelector('[data-account-rename]');
+  if (!input || !view || !button) return;
+  if (!editing) {
+    input.value = String(input.value || '').trim() || fallback;
+    view.textContent = input.value;
+  }
+  input.hidden = !editing;
+  view.hidden = editing;
+  button.textContent = editing ? '完成' : '重命名';
+  if (editing) {
+    input.focus();
+    input.select();
+  }
+}
+
+function toggleAccountRename(row) {
+  const input = row?.querySelector('[data-account-name]');
+  setAccountRenameEditing(row, Boolean(input?.hidden));
+}
+
+function accountManagerEntries() {
+  return Array.from(document.querySelectorAll('#accountList .account-row'))
+    .map((row, index) => {
+      const input = row.querySelector('[data-account-name]');
+      return {
+        name: String(input?.value || '').trim() || `账号${index + 1}`,
+        sourceIndex: Number(row.dataset.accountSourceIndex || 0),
+        editing: !input?.hidden
+      };
+    });
+}
+
+function accountManagerAccounts() {
+  return normalizeAccounts(accountManagerEntries());
+}
+
+function openAccountManager() {
+  if (accountCount()) {
+    stashCurrentTemplate();
+  }
+  renderAccountManager();
+  $('accountModal').hidden = false;
+}
+
+function closeAccountManager() {
+  $('accountModal').hidden = true;
+}
+
+function addAccountRow() {
+  const accounts = accountManagerEntries();
+  accounts.push({ name: `账号${accounts.length + 1}`, sourceIndex: 0, editing: true });
+  renderAccountManager(accounts);
+}
+
+function removeAccountRow(index) {
+  const accounts = accountManagerEntries();
+  accounts.splice(Number(index), 1);
+  renderAccountManager(accounts);
+}
+
+async function saveAccountManager() {
+  const entries = accountManagerEntries();
+  const accounts = normalizeAccounts(entries);
+  const next = collectSettings();
+  const previousTemplates = normalizeAccountTemplates(next.accountTemplates);
+  const remappedTemplates = {};
+  entries.forEach((entry, index) => {
+    const sourceIndex = Number(entry.sourceIndex || 0);
+    if (sourceIndex > 0 && previousTemplates[sourceIndex]) {
+      remappedTemplates[index + 1] = previousTemplates[sourceIndex];
+    }
+  });
+  next.chanjingAccounts = accounts;
+  next.accountTemplates = remappedTemplates;
+  next.chanjingAccountIndex = accounts.length
+    ? clampNumber(Number(next.chanjingAccountIndex || 1), 1, accounts.length)
+    : 0;
+  next.runChanjingAccountIndex = accounts.length
+    ? clampNumber(Number(next.runChanjingAccountIndex || next.chanjingAccountIndex || 1), 1, accounts.length)
+    : 0;
+  if (!accounts.length) {
+    next.currentTemplateId = '';
+    next.chanjingAssetIndex = 0;
+  }
+  settings = await window.huApp.saveSettings(next);
+  fillSettings(settings);
+  renderChanjingAccountOptions();
+  renderRunAccountOptions();
+  await refreshChanjingAssets();
+  refreshPreviewBackground();
+  updatePreviewSetupState();
+  closeAccountManager();
+  appendLog(`[账号] 已保存 ${accounts.length} 个账号\n`);
+}
+
+function templateManagerAccounts() {
+  return normalizeAccountManagerEntries(templateManagerDraftAccounts);
+}
+
+function templateManagerAccountName(index) {
+  const accountIndex = Math.max(1, Number(index || 1));
+  const accounts = templateManagerAccounts();
+  return accounts[accountIndex - 1]?.name || `账号${accountIndex}`;
+}
+
+function renderTemplateManagerAccountFilter() {
+  const filter = $('assetAccountFilter');
+  if (!filter) return;
+  const accounts = templateManagerAccounts();
+  const validIndexes = new Set(accounts.map((_account, index) => index + 1));
+  templateManagerFilterAccountIndexes = new Set(
+    Array.from(templateManagerFilterAccountIndexes).filter((index) => validIndexes.has(index))
+  );
+  filter.innerHTML = '';
+  filter.hidden = !accounts.length;
+  if (!accounts.length) return;
+
+  const allLabel = document.createElement('label');
+  allLabel.innerHTML = `<input data-template-account-filter-all type="checkbox" ${templateManagerFilterAccountIndexes.size ? '' : 'checked'} /><span>全部</span>`;
+  filter.appendChild(allLabel);
+  accounts.forEach((account, index) => {
+    const accountIndex = index + 1;
+    const label = document.createElement('label');
+    const checked = templateManagerFilterAccountIndexes.has(accountIndex) ? 'checked' : '';
+    label.innerHTML = `<input data-template-account-filter type="checkbox" value="${accountIndex}" ${checked} /><span>${escapeHtml(account.name || `账号${accountIndex}`)}</span>`;
+    filter.appendChild(label);
+  });
+}
+
+function applyTemplateManagerAccountFilter() {
+  const list = $('assetList');
+  if (!list) return;
+  list.querySelector('.template-filter-empty')?.remove();
+  const rows = Array.from(list.querySelectorAll('[data-template-id]'));
+  if (!rows.length) return;
+  const showAll = templateManagerFilterAccountIndexes.size === 0;
+  let visibleCount = 0;
+  rows.forEach((row) => {
+    const accountIndex = Number(row.dataset.templateAccountIndex || 0);
+    const visible = showAll || templateManagerFilterAccountIndexes.has(accountIndex);
+    row.style.display = visible ? '' : 'none';
+    row.classList.remove('asset-row-odd', 'asset-row-even');
+    if (visible) {
+      visibleCount += 1;
+      row.classList.add(visibleCount % 2 === 0 ? 'asset-row-even' : 'asset-row-odd');
+      const label = row.querySelector('[data-template-row-label]');
+      if (label) label.textContent = `模板${visibleCount}`;
+    }
+  });
+  if (!visibleCount) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-account template-filter-empty';
+    empty.textContent = '当前筛选没有模板';
+    list.appendChild(empty);
+  }
+  const hint = $('assetModalHint');
+  if (hint) {
+    hint.textContent = showAll
+      ? `当前共 ${rows.length} 个模板。`
+      : `当前显示 ${visibleCount} / ${rows.length} 个模板。`;
+  }
+}
+
+function handleTemplateManagerAccountFilterChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  if (target.matches('[data-template-account-filter-all]')) {
+    templateManagerFilterAccountIndexes.clear();
+    renderTemplateManagerAccountFilter();
+    applyTemplateManagerAccountFilter();
+    return;
+  }
+  if (!target.matches('[data-template-account-filter]')) return;
+  const accountIndex = Number(target.value || 0);
+  if (target.checked) {
+    templateManagerFilterAccountIndexes.add(accountIndex);
+  } else {
+    templateManagerFilterAccountIndexes.delete(accountIndex);
+  }
+  renderTemplateManagerAccountFilter();
+  applyTemplateManagerAccountFilter();
+}
+
+function updateAssetManagerAddButtonState() {
+  const addButton = $('btnAssetManagerAddTemplate');
+  const openAddAllButton = $('btnOpenAddAllTemplates');
+  const confirmAddAllButton = $('btnConfirmAddAllTemplates');
+  const hasAsset = Boolean(selectedAssetManagerSourceAsset());
+  const hasTargetAccount = Number($('assetManagerTemplateAccountIndex')?.value || 0) > 0;
+  const hasBulkAccount = Number($('assetAddAllAccountIndex')?.value || 0) > 0;
+  const hasAnyAsset = enabledChanjingAssets().length > 0;
+  if (addButton) {
+    addButton.disabled = !hasAsset || !hasTargetAccount;
+    addButton.textContent = '确认添加模板';
+  }
+  if (openAddAllButton) {
+    openAddAllButton.disabled = !hasAnyAsset;
+  }
+  if (confirmAddAllButton) {
+    confirmAddAllButton.disabled = !hasBulkAccount || !hasAnyAsset;
+  }
+}
+
+function renderAssetAddAllAccountOptions(preferredValue = '') {
+  const select = $('assetAddAllAccountIndex');
+  if (!select) return;
+  const accounts = templateManagerAccounts();
+  const current = String(preferredValue || select.value || templateManagerAccountIndex || '');
+  select.innerHTML = '';
+  const emptyOption = document.createElement('option');
+  emptyOption.value = '';
+  emptyOption.textContent = '请选择账号';
+  select.appendChild(emptyOption);
+  if (!accounts.length) {
+    const option = document.createElement('option');
+    option.value = '__new__';
+    option.textContent = '添加账号';
+    select.appendChild(option);
+    select.value = '';
+    select.disabled = false;
+    setAssetAddAllNewAccountOpen(false);
+    const hint = $('assetAddAllHint');
+    if (hint) hint.textContent = '请选择账号，或直接新建一个账号后再一键补全。';
+    updateAssetManagerAddButtonState();
+    return;
+  }
+  accounts.forEach((account, index) => {
+    const option = document.createElement('option');
+    option.value = String(index + 1);
+    option.textContent = account.name || `账号${index + 1}`;
+    select.appendChild(option);
+  });
+  const newOption = document.createElement('option');
+  newOption.value = '__new__';
+  newOption.textContent = '添加账号';
+  select.appendChild(newOption);
+  select.value = Number(current) >= 1 && Number(current) <= accounts.length ? current : '';
+  select.disabled = false;
+  setAssetAddAllNewAccountOpen(false);
+  const hint = $('assetAddAllHint');
+  if (hint) {
+    hint.textContent = accounts.length
+      ? '先选择账号，再确认补全所有模板。'
+      : '请先在添加模板里新建归属账号，或到账号管理中添加账号。';
+  }
+  updateAssetManagerAddButtonState();
+}
+
+function setAssetAddAllNewAccountOpen(open) {
+  const panel = $('assetAddAllNewAccountPanel');
+  const input = $('assetAddAllNewAccountName');
+  if (!panel) return;
+  panel.hidden = !open;
+  if (open && input) {
+    const accounts = templateManagerAccounts();
+    input.value = input.value || `账号${accounts.length + 1}`;
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+  }
+}
+
+function openAddAllTemplatesModal() {
+  renderAssetAddAllAccountOptions($('assetManagerTemplateAccountIndex')?.value || templateManagerAccountIndex || '');
+  $('assetAddModal').hidden = true;
+  $('assetAddAllModal').hidden = false;
+  updateAssetManagerAddButtonState();
+}
+
+function cancelAddAllTemplatesModal() {
+  $('assetAddAllModal').hidden = true;
+  $('assetAddModal').hidden = false;
+  const input = $('assetAddAllNewAccountName');
+  if (input) input.value = '';
+  setAssetAddAllNewAccountOpen(false);
+  const hint = $('assetAddHint');
+  if (hint) hint.textContent = '选择模板人物形象和归属账号，确认后会自动保存并返回模板预览。';
+  updateAssetManagerAddButtonState();
+}
+
+function addAssetAddAllDraftAccount(nameFromPrompt = '') {
+  const accounts = templateManagerAccounts();
+  const fallback = `账号${accounts.length + 1}`;
+  const name = String(nameFromPrompt || '').trim() || fallback;
+  accounts.push({ name, sourceIndex: 0 });
+  templateManagerDraftAccounts = accounts;
+  templateManagerAccountIndex = accounts.length;
+  const input = $('assetAddAllNewAccountName');
+  if (input) input.value = '';
+  setAssetAddAllNewAccountOpen(false);
+  renderAssetAddAllAccountOptions(String(templateManagerAccountIndex));
+  renderAssetManagerTemplateAccountOptions(String(templateManagerAccountIndex));
+  renderAssetManager();
+  const hint = $('assetAddAllHint');
+  if (hint) hint.textContent = `已新建 ${name}，可以确认一键补全所有模板。`;
+}
+
+function confirmAssetAddAllNewAccount() {
+  addAssetAddAllDraftAccount($('assetAddAllNewAccountName')?.value || '');
+}
+
+function cancelAssetAddAllNewAccount() {
+  const input = $('assetAddAllNewAccountName');
+  if (input) input.value = '';
+  setAssetAddAllNewAccountOpen(false);
+  renderAssetAddAllAccountOptions(String(templateManagerAccountIndex || ''));
+}
+
+function handleAssetAddAllAccountChange() {
+  const select = $('assetAddAllAccountIndex');
+  if (!select) return;
+  if (select.value !== '__new__') {
+    setAssetAddAllNewAccountOpen(false);
+    updateAssetManagerAddButtonState();
+    return;
+  }
+  setAssetAddAllNewAccountOpen(true);
+  updateAssetManagerAddButtonState();
+}
+
+function renderAssetManagerTemplateAccountOptions(preferredValue = '') {
+  const select = $('assetManagerTemplateAccountIndex');
+  if (!select) return;
+  const accounts = templateManagerAccounts();
+  const current = String(preferredValue || select.value || templateManagerAccountIndex || '');
+  select.innerHTML = '';
+  const emptyOption = document.createElement('option');
+  emptyOption.value = '';
+  emptyOption.textContent = '请选择归属账号';
+  select.appendChild(emptyOption);
+  if (!accounts.length) {
+    const option = document.createElement('option');
+    option.value = '__new__';
+    option.textContent = '添加账号';
+    select.appendChild(option);
+    select.value = '';
+    select.disabled = false;
+    setAssetManagerNewAccountOpen(false);
+    updateAssetManagerAddButtonState();
+    return;
+  }
+  accounts.forEach((account, index) => {
+    const option = document.createElement('option');
+    option.value = String(index + 1);
+    option.textContent = account.name || `账号${index + 1}`;
+    select.appendChild(option);
+  });
+  const newOption = document.createElement('option');
+  newOption.value = '__new__';
+  newOption.textContent = '添加账号';
+  select.appendChild(newOption);
+  select.value = Number(current) >= 1 && Number(current) <= accounts.length ? current : String(accounts.length);
+  select.disabled = false;
+  setAssetManagerNewAccountOpen(false);
+  updateAssetManagerAddButtonState();
+}
+
+function setAssetManagerNewAccountOpen(open) {
+  const panel = $('assetManagerNewAccountPanel');
+  const input = $('assetManagerNewAccountName');
+  if (!panel) return;
+  panel.hidden = !open;
+  if (open && input) {
+    const accounts = templateManagerAccounts();
+    input.value = input.value || `账号${accounts.length + 1}`;
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+  }
+}
+
+function addAssetManagerDraftAccount(nameFromPrompt = '') {
+  const accounts = templateManagerAccounts();
+  const fallback = `账号${accounts.length + 1}`;
+  const name = String(nameFromPrompt || '').trim() || fallback;
+  accounts.push({ name, sourceIndex: 0 });
+  templateManagerDraftAccounts = accounts;
+  templateManagerAccountIndex = accounts.length;
+  const input = $('assetManagerNewAccountName');
+  if (input) input.value = '';
+  setAssetManagerNewAccountOpen(false);
+  renderAssetManagerTemplateAccountOptions(String(templateManagerAccountIndex));
+  renderAssetManager();
+  const hint = assetManagerHintElement();
+  if (hint) hint.textContent = `已新建 ${name}，选择模板人物形象后可以添加模板。`;
+}
+
+function confirmAssetManagerNewAccount() {
+  addAssetManagerDraftAccount($('assetManagerNewAccountName')?.value || '');
+}
+
+function cancelAssetManagerNewAccount() {
+  const input = $('assetManagerNewAccountName');
+  if (input) input.value = '';
+  setAssetManagerNewAccountOpen(false);
+  renderAssetManagerTemplateAccountOptions(String(templateManagerAccountIndex || ''));
+}
+
+function handleAssetManagerTemplateAccountChange() {
+  const select = $('assetManagerTemplateAccountIndex');
+  if (!select) return;
+  if (select.value !== '__new__') {
+    setAssetManagerNewAccountOpen(false);
+    updateAssetManagerAddButtonState();
+    return;
+  }
+  setAssetManagerNewAccountOpen(true);
+  updateAssetManagerAddButtonState();
+}
+
+function appendTemplateManagerRow(template, index, accountIndex = templateManagerAccountIndex || settings.chanjingAccountIndex || 1) {
+  const list = $('assetList');
+  if (!list) return;
+  const asset = enabledAssetByIndex(template.assetIndex);
+  const config = template.config || newTemplateDefaultConfig();
+  const editing = template.isNew === true;
+  templateManagerDraftConfigs.set(template.id, cloneTemplateValue(config));
+  const row = document.createElement('div');
+  row.className = 'asset-row';
+  row.dataset.templateId = template.id;
+  row.dataset.templateAssetIndex = String(template.assetIndex || 1);
+  row.dataset.templateAccountIndex = String(Math.max(1, Number(accountIndex || 1)));
+
+  const label = document.createElement('span');
+  label.dataset.templateRowLabel = 'true';
+  label.textContent = `模板${index + 1}`;
+
+  const nameCell = document.createElement('div');
+  nameCell.className = 'rename-name-cell';
+  const nameView = document.createElement('span');
+  nameView.className = 'rename-name-view';
+  nameView.dataset.templateNameView = 'true';
+  nameView.textContent = template.name || `模板${index + 1}`;
+  const name = document.createElement('input');
+  name.dataset.templateName = 'true';
+  name.value = template.name || `模板${index + 1}`;
+  name.placeholder = `模板${index + 1}`;
+  name.hidden = !editing;
+  nameView.hidden = editing;
+  nameCell.appendChild(nameView);
+  nameCell.appendChild(name);
+
+  const rename = document.createElement('button');
+  rename.className = 'button secondary small-button rename-button';
+  rename.type = 'button';
+  rename.dataset.templateRename = template.id;
+  rename.textContent = editing ? '完成' : '重命名';
+
+  const assetLabel = document.createElement('span');
+  assetLabel.className = 'template-asset-label';
+  assetLabel.textContent = `${templateManagerAccountName(accountIndex)} · ${asset ? digitalAssetName(asset) : `人物模板${template.assetIndex}`}`;
+
+  const remove = document.createElement('button');
+  remove.className = 'icon-button danger';
+  remove.type = 'button';
+  remove.dataset.templateRemove = template.id;
+  remove.title = '删除模板';
+  remove.textContent = '×';
+
+  row.appendChild(label);
+  row.appendChild(nameCell);
+  row.appendChild(rename);
+  row.appendChild(assetLabel);
+  row.appendChild(remove);
+  list.appendChild(row);
+}
+
+function renumberTemplateManagerRows() {
+  applyTemplateManagerAccountFilter();
+}
+
+function setTemplateRenameEditing(row, editing) {
+  if (!row) return;
+  const rows = Array.from(document.querySelectorAll('#assetList [data-template-id]'));
+  const index = rows.indexOf(row);
+  const fallback = `模板${index + 1 || rows.length + 1}`;
+  const input = row.querySelector('[data-template-name]');
+  const view = row.querySelector('[data-template-name-view]');
+  const button = row.querySelector('[data-template-rename]');
+  if (!input || !view || !button) return;
+  if (!editing) {
+    input.value = String(input.value || '').trim() || fallback;
+    view.textContent = input.value;
+  }
+  input.hidden = !editing;
+  view.hidden = editing;
+  button.textContent = editing ? '完成' : '重命名';
+  if (editing) {
+    input.focus();
+    input.select();
+  }
+}
+
+function toggleTemplateRename(row) {
+  const input = row?.querySelector('[data-template-name]');
+  setTemplateRenameEditing(row, Boolean(input?.hidden));
+}
+
+async function addAllTemplateRowsInManager(targetAccount) {
+  const list = $('assetList');
+  const assets = enabledChanjingAssets();
+  const hint = assetManagerHintElement();
+  if (!list || !assets.length) {
+    if (hint) hint.textContent = '未找到可以添加的数字人形象。';
+    return;
+  }
+  templateManagerAccountIndex = targetAccount;
+  list.querySelector('.empty-account')?.remove();
+  const rows = Array.from(list.querySelectorAll('[data-template-id]'));
+  const targetRows = rows.filter((row) => Number(row.dataset.templateAccountIndex || 0) === targetAccount);
+  const existingAssetIndexes = new Set(
+    targetRows
+      .map((row) => Number(row.dataset.templateAssetIndex || 0))
+      .filter((index) => index > 0)
+  );
+  let totalCount = rows.length;
+  let accountCount = targetRows.length;
+  let added = 0;
+  let skipped = 0;
+  assets.forEach((asset) => {
+    const assetIndex = Number(asset.index || 0);
+    if (!assetIndex) return;
+    if (existingAssetIndexes.has(assetIndex)) {
+      skipped += 1;
+      return;
+    }
+    appendTemplateManagerRow({
+      id: newTemplateId(),
+      name: `模板${accountCount + 1}`,
+      assetIndex,
+      enabled: true,
+      isNew: true,
+      config: newTemplateDefaultConfig()
+    }, totalCount, targetAccount);
+    existingAssetIndexes.add(assetIndex);
+    totalCount += 1;
+    accountCount += 1;
+    added += 1;
+  });
+  if (!added) {
+    if (hint) hint.textContent = `${templateManagerAccountName(targetAccount)} 已经包含全部数字人形象。`;
+    return;
+  }
+  if (hint) hint.textContent = `已添加 ${added} 个模板到 ${templateManagerAccountName(targetAccount)}，正在刷新...`;
+  try {
+    await saveAssetManager({ close: false, quiet: true });
+    appendLog(`[模板] 已添加并保存 ${added} 个模板到 ${templateManagerAccountName(targetAccount)}${skipped ? `，跳过 ${skipped} 个已有形象` : ''}\n`);
+    closeAddTemplateModal();
+    closeAssetManager();
+  } catch (error) {
+    if (hint) hint.textContent = `模板保存失败：${error.message}`;
+    appendLog(`[模板保存失败] ${error.message}\n`, true);
+  }
+}
+
+async function addAllTemplatesFromButton() {
+  const targetAccount = Number($('assetAddAllAccountIndex')?.value || 0);
+  const hint = assetManagerHintElement();
+  if (!targetAccount) {
+    if (hint) hint.textContent = '请先选择账号。';
+    return;
+  }
+  await addAllTemplateRowsInManager(targetAccount);
+}
+
+async function addTemplateRowInManager() {
+  const list = $('assetList');
+  const targetAccount = Number($('assetManagerTemplateAccountIndex')?.value || 0);
+  const sourceValue = String($('assetManagerSourceAssetIndex')?.value || '');
+  const assetIndex = Number(sourceValue || 0);
+  if (!targetAccount) {
+    const hint = assetManagerHintElement();
+    if (hint) hint.textContent = '请先选择归属账号，或在这里新建一个账号。';
+    return;
+  }
+  if (!list || !assetIndex || !enabledAssetByIndex(assetIndex)) {
+    const hint = assetManagerHintElement();
+    if (hint) hint.textContent = '请先选择模板人物形象。';
+    return;
+  }
+  templateManagerAccountIndex = targetAccount;
+  list.querySelector('.empty-account')?.remove();
+  const rows = Array.from(list.querySelectorAll('[data-template-id]'));
+  const count = rows.length;
+  const accountCount = rows.filter((row) => Number(row.dataset.templateAccountIndex || 0) === targetAccount).length;
+  appendTemplateManagerRow({
+    id: newTemplateId(),
+    name: `模板${accountCount + 1}`,
+    assetIndex,
+    enabled: true,
+    isNew: true,
+    config: newTemplateDefaultConfig()
+  }, count, targetAccount);
+  const hint = assetManagerHintElement();
+  if (hint) hint.textContent = `已添加到 ${templateManagerAccountName(templateManagerAccountIndex)}，正在刷新...`;
+  try {
+    await saveAssetManager({ close: false, quiet: true });
+    appendLog(`[模板] 已添加并保存到 ${templateManagerAccountName(templateManagerAccountIndex)}\n`);
+    closeAddTemplateModal();
+    closeAssetManager();
+  } catch (error) {
+    if (hint) hint.textContent = `模板保存失败：${error.message}`;
+    appendLog(`[模板保存失败] ${error.message}\n`, true);
+  }
+}
+
+function renderAssetManager() {
+  const list = $('assetList');
+  if (!list) return;
+  const accounts = templateManagerAccounts();
+  const templatesByAccount = normalizeAccountTemplates(settings.accountTemplates);
+  renderTemplateManagerAccountFilter();
+  list.innerHTML = '';
+  if (!accounts.length) {
+    const hint = $('assetModalHint');
+    if (hint) hint.textContent = '请点击“添加模板”，选择模板人物形象，并在归属账号下拉框中新建账号。';
+    return;
+  }
+  let count = 0;
+  accounts.forEach((_account, accountOffset) => {
+    const accountIndex = accountOffset + 1;
+    const templates = templatesByAccount[accountIndex] || [];
+    templates.forEach((template) => appendTemplateManagerRow(template, count++, accountIndex));
+  });
+  if (!count) {
+    const hint = $('assetModalHint');
+    if (hint) hint.textContent = '还没有模板，请点击“添加模板”。';
+    return;
+  }
+  applyTemplateManagerAccountFilter();
+}
+
+function templateManagerTemplatesByAccount() {
+  const currentByAccount = normalizeAccountTemplates(settings.accountTemplates);
+  const rows = Array.from(document.querySelectorAll('[data-template-id]'));
+  const positions = {};
+  const grouped = {};
+  rows.forEach((row) => {
+    const accountIndex = Math.max(1, Number(row.dataset.templateAccountIndex || 1));
+    const current = currentByAccount[accountIndex] || [];
+    const byId = new Map(current.map((template) => [template.id, template]));
+    const id = row.dataset.templateId;
+    const original = byId.get(id) || {};
+    positions[accountIndex] = (positions[accountIndex] || 0) + 1;
+    const template = {
+      ...original,
+      id,
+      name: row.querySelector('[data-template-name]')?.value?.trim() || `模板${positions[accountIndex]}`,
+      enabled: true,
+      assetIndex: Number(row.dataset.templateAssetIndex || original.assetIndex || 1),
+      config: original.config || templateManagerDraftConfigs.get(id) || newTemplateDefaultConfig()
+    };
+    if (!grouped[accountIndex]) grouped[accountIndex] = [];
+    grouped[accountIndex].push(template);
+  });
+  return normalizeAccountTemplates(grouped);
+}
+
+function openAssetManager() {
+  if (settings.currentTemplateId) {
+    stashCurrentTemplate();
+  }
+  templateManagerDraftConfigs = new Map();
+  templateManagerDraftAccounts = normalizeAccountManagerEntries(settings.chanjingAccounts);
+  templateManagerAccountIndex = settings.chanjingAccountIndex || firstAccountWithEnabledTemplate() || (templateManagerDraftAccounts.length ? 1 : 0);
+  templateManagerFilterAccountIndexes = new Set();
+  renderAssetManagerTemplateAccountOptions(String(templateManagerAccountIndex || ''));
+  renderAssetManager();
+  $('assetModal').hidden = false;
+}
+
+function closeAssetManager() {
+  templateManagerDraftConfigs = new Map();
+  templateManagerDraftAccounts = [];
+  $('assetModal').hidden = true;
+}
+
+async function saveAssetManager(options = {}) {
+  const closeAfterSave = options.close !== false;
+  const quiet = options.quiet === true;
+  const accounts = normalizeAccounts(templateManagerDraftAccounts);
+  const baseSettings = collectSettings();
+  const accountTemplates = templateManagerTemplatesByAccount();
+  const enabledEntries = [];
+  for (const [accountKey, list] of Object.entries(accountTemplates)) {
+    const accountIndex = Math.max(1, Number(accountKey || 1));
+    list.forEach((template) => {
+      if (template.enabled !== false) enabledEntries.push({ accountIndex, template });
+    });
+  }
+  const currentAccount = accounts.length
+    ? clampNumber(Number(baseSettings.chanjingAccountIndex || settings.chanjingAccountIndex || 1), 1, accounts.length)
+    : 0;
+  const currentTemplateStillEnabled = enabledEntries.find((entry) => (
+    entry.accountIndex === currentAccount && entry.template.id === settings.currentTemplateId
+  ));
+  const selectedEntry = currentTemplateStillEnabled || enabledEntries[0] || null;
+  const nextAccount = selectedEntry?.accountIndex || (accounts.length ? currentAccount || 1 : 0);
+  const nextId = selectedEntry?.template?.id || '';
+
+  settings = await window.huApp.saveSettings({
+    ...baseSettings,
+    chanjingAccounts: accounts,
+    accountTemplates,
+    chanjingAccountIndex: nextAccount,
+    runChanjingAccountIndex: accounts.length
+      ? clampNumber(Number(baseSettings.runChanjingAccountIndex || nextAccount || 1), 1, accounts.length)
+      : 0,
+    currentTemplateId: nextId,
+    chanjingAssetIndex: selectedEntry?.template?.assetIndex || 0
+  });
+  fillSettings(settings);
+  renderChanjingAccountOptions();
+  renderRunAccountOptions();
+  await refreshChanjingAssets();
+
+  refreshPreviewBackground();
+  updatePreviewSetupState();
+  if (closeAfterSave) {
+    closeAssetManager();
+  }
+  if (!quiet) {
+    appendLog(`[模板] 已保存 ${enabledEntries.length} 个模板\n`);
+  }
+}
+
+async function refreshChanjingAssets() {
+  if (!window.huApp?.listChanjingAssets) return;
+  try {
+    chanjingAssets = await window.huApp.listChanjingAssets(collectSettings());
+  } catch (_error) {
+    chanjingAssets = [];
+  }
+  renderTemplateSourceAssetOptions();
+  renderAssetManagerSourceAssetOptions();
+  renderTemplateOptions();
+  updateChanjingAssetHint();
+  renderRowTemplateControls();
+  updatePreviewSetupState();
+}
+
+function switchAccountAssetTemplate(nextAccountIndex, nextTemplateId) {
+  if (!accountCount()) {
+    settings.chanjingAccountIndex = 0;
+    settings.runChanjingAccountIndex = 0;
+    renderChanjingAccountOptions();
+    renderRunAccountOptions();
+    renderTemplateOptions();
+    updateChanjingAssetHint();
+    updatePreviewSetupState();
+    return;
+  }
+  const previousAccount = Number(settings.chanjingAccountIndex || 1);
+  const previousTemplateId = settings.currentTemplateId;
+  if (previousTemplateId) {
+    stashCurrentTemplate(previousAccount, previousTemplateId);
+  }
+
+  const account = clampNumber(Number(nextAccountIndex || 1), 1, accountCount());
+  const template = templateById(account, nextTemplateId, false) || firstEnabledTemplate(account);
+  const nextConfig = template?.config || templateFallback();
+  const nextSettings = {
+    ...settings,
+    ...nextConfig,
+    chanjingAccountIndex: account,
+    currentTemplateId: template?.id || '',
+    chanjingAssetIndex: template?.assetIndex || 0
+  };
+  fillSettings(nextSettings);
+  renderChanjingAccountOptions();
+  renderRunAccountOptions();
+  renderTemplateOptions();
+  updateChanjingAssetHint();
+  updatePreviewSetupState();
+  refreshPreviewBackground();
+}
+
+async function addTemplateFromSelectedAsset() {
+  if (!accountCount()) {
+    updatePreviewSetupState();
+    return;
+  }
+  const assetIndex = Number($('templateSourceAssetIndex')?.value || settings.templateSourceAssetIndex || 0);
+  if (!assetIndex || !enabledAssetByIndex(assetIndex)) {
+    const hint = $('chanjingAssetHint');
+    if (hint) hint.textContent = '请先选择模板人物形象。';
+    return;
+  }
+  if (settings.currentTemplateId) {
+    stashCurrentTemplate(settings.chanjingAccountIndex, settings.currentTemplateId);
+  }
+  const account = Math.max(1, Number(settings.chanjingAccountIndex || 1));
+  const accountTemplates = normalizeAccountTemplates(settings.accountTemplates);
+  const list = accountTemplates[account] || [];
+  const template = {
+    id: newTemplateId(),
+    name: `模板${list.length + 1}`,
+    assetIndex,
+    enabled: true,
+    config: newTemplateDefaultConfig()
+  };
+  list.push(template);
+  accountTemplates[account] = list;
+  settings = await window.huApp.saveSettings({
+    ...collectSettings(),
+    accountTemplates,
+    currentTemplateId: template.id,
+    chanjingAssetIndex: assetIndex,
+    templateSourceAssetIndex: assetIndex
+  });
+  fillSettings(settings);
+  renderChanjingAccountOptions();
+  renderRunAccountOptions();
+  await refreshChanjingAssets();
+  refreshPreviewBackground();
+  updatePreviewSetupState();
+  appendLog(`[模板] 已添加 ${template.name}，绑定 ${digitalAssetName(enabledAssetByIndex(assetIndex))}\n`);
 }
 
 async function resetPreviewLayoutToDefaults() {
@@ -909,7 +3247,53 @@ function endPreviewDrag() {
 async function saveSettings() {
   settings = await window.huApp.saveSettings(collectSettings());
   fillSettings(settings);
+  renderChanjingAccountOptions();
+  renderRunAccountOptions();
+  await refreshChanjingAssets();
+  refreshPreviewBackground();
+  updatePreviewSetupState();
   appendLog('[设置] 已保存\n');
+}
+
+async function refreshAfterSettingsImport(nextSettings) {
+  settings = nextSettings || await window.huApp.loadSettings();
+  fillSettings(settings);
+  renderChanjingAccountOptions();
+  renderRunAccountOptions();
+  renderTemplateOptions();
+  await refreshChanjingAssets();
+  renderRowTemplateControls();
+  syncTemplateSelectionUi();
+  refreshPreviewBackground();
+  updatePreviewSetupState();
+  schedulePreviewLayoutUpdate();
+}
+
+async function exportSettingsConfig() {
+  try {
+    const current = collectSettings();
+    const result = await window.huApp.exportSettings(current);
+    if (!result) return;
+    settings = result.settings || await window.huApp.loadSettings();
+    fillSettings(settings);
+    appendLog(`[配置] 已导出：${result.filePath}\n`);
+  } catch (error) {
+    appendLog(`[配置导出失败] ${error.message}\n`, true);
+    setStatus('配置导出失败', 'error');
+  }
+}
+
+async function importSettingsConfig() {
+  try {
+    const result = await window.huApp.importSettings();
+    if (!result) return;
+    await refreshAfterSettingsImport(result.settings);
+    appendLog(`[配置] 已导入：${result.filePath}\n`);
+    setStatus('配置已导入');
+  } catch (error) {
+    appendLog(`[配置导入失败] ${error.message}\n`, true);
+    setStatus('配置导入失败', 'error');
+  }
 }
 
 function renderSummary(summary) {
@@ -919,8 +3303,9 @@ function renderSummary(summary) {
   const body = $('itemsTable');
   body.innerHTML = '';
   if (!summary || !summary.items.length) {
-    body.innerHTML = '<tr><td colspan="8" class="empty">还没有导入任务</td></tr>';
+    body.innerHTML = '<tr><td colspan="9" class="empty">还没有导入任务</td></tr>';
     updateSelectAllState();
+    updateAssetSelectionModeUi();
     return;
   }
   for (const item of summary.items) {
@@ -932,6 +3317,11 @@ function renderSummary(summary) {
     tr.innerHTML = `
       <td class="select-col"><input class="row-selector" data-row-select="${item.index}" type="checkbox" checked /></td>
       <td>${item.index}</td>
+      <td class="asset-cell" data-asset-column>
+        <select class="asset-select" data-row-template-id="${item.index}">
+          ${rowAssetOptionsHtml(defaultRowTemplateSelection())}
+        </select>
+      </td>
       <td>${escapeHtml(String(item.code || item.id || ''))}</td>
       <td>${escapeHtml(item.topic || '')}</td>
       <td class="title-cell">
@@ -952,6 +3342,8 @@ function renderSummary(summary) {
   bindRowSelectors();
   bindTitleEditors();
   bindContentEditors();
+  renderRowTemplateControls();
+  applyTemplateModeToRows(currentAssetSelectionMode());
   updateSelectedCount();
   updateSelectAllState();
 }
@@ -1103,6 +3495,74 @@ function saveContentEditor() {
   closeContentEditor();
 }
 
+function updateCustomTextCharCount() {
+  const editor = $('customTextEditor');
+  if (!editor) return;
+  $('customTextCharCount').textContent = `${editor.value.length} 字`;
+}
+
+function openCustomTextEditor() {
+  if (running) return;
+  const hint = $('customTextHint');
+  if (hint) hint.textContent = '正文只做标点规范，不改文字内容。';
+  updateCustomTextCharCount();
+  $('customTextModal').hidden = false;
+  $('customTextEditor').focus();
+}
+
+function closeCustomTextEditor() {
+  if (customTextSaving) return;
+  $('customTextModal').hidden = true;
+}
+
+async function saveCustomTextEditor() {
+  if (customTextSaving) return;
+  const editor = $('customTextEditor');
+  const text = editor.value.trim();
+  const hint = $('customTextHint');
+  if (!text) {
+    if (hint) hint.textContent = '请先粘贴文案';
+    return;
+  }
+  customTextSaving = true;
+  const saveButton = $('btnSaveCustomText');
+  const cancelButton = $('btnCancelCustomText');
+  saveButton.disabled = true;
+  cancelButton.disabled = true;
+  saveButton.textContent = '生成中...';
+  if (hint) hint.textContent = '正在调用模型整理文案...';
+  try {
+    const result = await window.huApp.saveCustomText({
+      name: '自定义文案',
+      text,
+      settings: collectSettings()
+    });
+    inputJsonPath = result.filePath;
+    const selectedJsonName = $('selectedJsonName');
+    if (selectedJsonName) {
+      selectedJsonName.textContent = result.filePath.split(/[\\/]/).pop() || result.filePath;
+      selectedJsonName.title = result.filePath;
+    }
+    contentOverrides = {};
+    renderSummary(result.summary);
+    resetRunRows();
+    generatePreviewTitle();
+    generatePreviewCaption();
+    refreshPreviewBackground();
+    appendLog(`[自定义文案] 已生成 ${result.summary?.count || 0} 条任务\n`);
+    $('customTextModal').hidden = true;
+  } catch (error) {
+    if (hint) hint.textContent = error.message || '模型整理失败';
+    appendLog(`[自定义文案失败] ${error.message}\n`, true);
+  } finally {
+    customTextSaving = false;
+    saveButton.disabled = false;
+    cancelButton.disabled = false;
+    saveButton.textContent = '生成任务';
+    updateCustomTextCharCount();
+  }
+}
+
 function collectTitleOverrides() {
   const overrides = {};
   document.querySelectorAll('[data-title-slug]').forEach((el) => {
@@ -1120,9 +3580,27 @@ function collectTitleOverrides() {
 
 function collectSelectedIndexes() {
   return Array.from(document.querySelectorAll('[data-row-select]:checked'))
+    .filter((el) => !el.disabled)
     .map((el) => Number(el.dataset.rowSelect || 0))
     .filter((index) => index > 0)
     .sort((a, b) => a - b);
+}
+
+function collectTemplateAssignments(selectedIndexes = collectSelectedIndexes()) {
+  const choices = allTemplateChoices();
+  const assignments = {};
+  if (!choices.length) return assignments;
+  const fallback = templateChoiceValue(choices[0].accountIndex, choices[0].template.id);
+  for (const index of selectedIndexes) {
+    const value = String(document.querySelector(`[data-row-template-id="${index}"]`)?.value || '');
+    assignments[index] = templateChoiceByValue(value) ? value : fallback;
+  }
+  return assignments;
+}
+
+function ensureTemplatesForRun(current) {
+  current.accountTemplates = normalizeAccountTemplates(settings.accountTemplates);
+  return current;
 }
 
 function firstSelectedIndex() {
@@ -1144,11 +3622,11 @@ function updateSelectedCount() {
 function updateSelectAllState() {
   const selectAll = $('selectAllRows');
   if (!selectAll) return;
-  const selectors = Array.from(document.querySelectorAll('[data-row-select]'));
+  const selectors = Array.from(document.querySelectorAll('[data-row-select]')).filter((el) => !el.disabled);
   const checked = selectors.filter((el) => el.checked).length;
   selectAll.checked = selectors.length > 0 && checked === selectors.length;
   selectAll.indeterminate = checked > 0 && checked < selectors.length;
-  selectAll.disabled = running || selectors.length === 0;
+  selectAll.disabled = selectors.length === 0;
 }
 
 function bindRowSelectors() {
@@ -1213,6 +3691,9 @@ function setRowLocked(row, locked) {
   row.querySelectorAll('[data-content-edit]').forEach((el) => {
     el.textContent = locked ? '查看' : '编辑';
   });
+  row.querySelectorAll('[data-row-template-id]').forEach((el) => {
+    el.disabled = locked;
+  });
 }
 
 function setSelectorsLocked(locked) {
@@ -1228,10 +3709,23 @@ function setSelectorsLocked(locked) {
   if (selectAll) {
     selectAll.disabled = locked || !currentSummary?.count;
   }
+  const templateButton = $('templateSelectionButton');
+  if (templateButton) {
+    templateButton.disabled = locked;
+    if (locked) setTemplateSelectionOpen(false);
+  }
+  const runAccount = $('runChanjingAccountIndex');
+  if (runAccount) runAccount.disabled = locked || !accountCount();
+  const assetMode = $('assetSelectionMode');
+  if (assetMode) assetMode.disabled = locked;
+  updateAssetSelectionModeUi();
+  syncTemplateSelectionUi();
+  updateActiveRunSelectionLocks();
 }
 
 function resetRunRows() {
   lockedThroughIndex = 0;
+  activeRunIndexes = new Set();
   resetTimingState();
   rows().forEach((row) => {
     row.classList.remove('row-running', 'row-done', 'row-failed', 'row-locked');
@@ -1243,11 +3737,13 @@ function resetRunRows() {
 
 function lockRowsThrough(index) {
   lockedThroughIndex = Math.max(lockedThroughIndex, Number(index) || 0);
+  const queuedIndexes = queuedRunIndexes();
   rows().forEach((row) => {
     const rowIndex = Number(row.dataset.rowIndex || 0);
-    const selected = row.querySelector('[data-row-select]')?.checked;
-    setRowLocked(row, selected && rowIndex <= lockedThroughIndex);
+    const shouldLock = queuedIndexes.has(rowIndex) || row.classList.contains('row-done') || row.classList.contains('row-failed');
+    setRowLocked(row, shouldLock);
   });
+  updateActiveRunSelectionLocks();
 }
 
 function setRunningRow(index) {
@@ -1396,6 +3892,12 @@ function validateBeforeRun() {
       throw new Error(`请先填写：${label}`);
     }
   }
+  if (!normalizeAccounts(current.chanjingAccounts).length) {
+    throw new Error('请先添加账号');
+  }
+  if (!allTemplateChoices().length) {
+    throw new Error('请至少添加一个模板');
+  }
   if (current.clipTitleMotion) {
     if (current.useOpeningVideoFile && !current.openingVideoFile) {
       throw new Error('请先选择：指定开头视频文件');
@@ -1406,10 +3908,11 @@ function validateBeforeRun() {
   }
   if (current.clipPip) {
     const pipRows = normalizePipRules(current.pipRules);
-    const hasPartialPipRow = pipRows.some((rule) => !rule.keywords || !rule.videoFile);
-    const hasCompletePipRow = pipRows.some((rule) => rule.keywords && rule.videoFile);
+    const pipRuleSourceReady = (rule) => rule.useVideoFile ? Boolean(rule.videoFile) : Boolean(rule.videoFolder);
+    const hasPartialPipRow = pipRows.some((rule) => !rule.keywords || !pipRuleSourceReady(rule));
+    const hasCompletePipRow = pipRows.some((rule) => rule.keywords && pipRuleSourceReady(rule));
     if (hasPartialPipRow) {
-      throw new Error('自定义画中画每一行都要同时填写关键词和视频文件');
+      throw new Error('自定义画中画每一行都要填写关键词，并按“使用指定”状态填写素材文件或素材文件夹');
     }
     if (!hasCompletePipRow && !current.pipFolder) {
       throw new Error('请先填写：画中画文件夹');
@@ -1421,6 +3924,12 @@ function validateBeforeRun() {
   if (current.clipTextEffects && !current.textEffectIds.length) {
     throw new Error('请至少勾选一种花字效果');
   }
+  if (current.clipLogo && current.useLogoFile && !current.logoFile) {
+    throw new Error('请先选择：指定 Logo 图片');
+  }
+  if (current.clipLogo && !current.useLogoFile && !current.logoFolder) {
+    throw new Error('请先填写：Logo 文件夹');
+  }
   if (current.clipTextEffects && current.useSfxFile && !current.sfxFile) {
     throw new Error('请先选择：指定音效文件');
   }
@@ -1431,16 +3940,25 @@ function validateBeforeRun() {
     throw new Error('请先选择：指定音效文件');
   }
   if (!inputJsonPath) {
-    throw new Error('请先选择 JSON 文件');
+    throw new Error('请先选择生成文案或自定义文案');
   }
   if (!collectSelectedIndexes().length) {
     throw new Error('请至少勾选一行出片');
+  }
+  const missing = collectSelectedIndexes().find((index) => {
+    const value = String(document.querySelector(`[data-row-template-id="${index}"]`)?.value || '');
+    return !templateChoiceByValue(value);
+  });
+  if (missing) {
+    throw new Error(`第 ${missing} 行还没有选择可用账号模板`);
   }
   return current;
 }
 
 async function startRun() {
-  if (running) return;
+  if (!running && !activeQueueItem) {
+    queueStopRequested = false;
+  }
   let current;
   try {
     current = validateBeforeRun();
@@ -1449,40 +3967,134 @@ async function startRun() {
     setStatus('配置不完整', 'error');
     return;
   }
-  settings = await window.huApp.saveSettings(current);
   const selectedIndexes = collectSelectedIndexes();
+  const templateAssignments = collectTemplateAssignments(selectedIndexes);
+  current = ensureTemplatesForRun(current, templateAssignments);
+  try {
+    settings = await window.huApp.saveSettings(current);
+  } catch (error) {
+    setStatus('保存配置失败', 'error');
+    appendLog(`[保存配置失败] ${error.message}\n`, true);
+    return;
+  }
+
+  const queueId = ++queueSeq;
+  const createdAt = Date.now();
+  const batchOutputName = `任务${compactTimestamp(createdAt)}${String(queueId).padStart(3, '0')}`;
+  const item = {
+    id: queueId,
+    name: currentSummary?.meta?.name || '未命名任务',
+    status: 'pending',
+    selectedIndexes: [...selectedIndexes],
+    createdAt,
+    batchOutputName,
+    startedAt: 0,
+    completedAt: 0,
+    failures: 0,
+    exitCode: null,
+    error: '',
+    payload: {
+      settings: cloneForQueue(settings),
+      inputJsonPath,
+      selectedIndexes: [...selectedIndexes],
+      batchOutputName,
+      assetAssignments: cloneForQueue(templateAssignments),
+      templateAssignments: cloneForQueue(templateAssignments),
+      titleOverrides: cloneForQueue(collectTitleOverrides()),
+      contentOverrides: cloneForQueue(collectContentOverrides())
+    }
+  };
+  runQueue.push(item);
+  lockPendingQueueRows();
+  clearSelectedRows();
+  renderQueue();
+  appendLog(`[队列] 已加入第 ${item.id} 批：第 ${queueRowsText(selectedIndexes)} 行\n`);
+  setStatus(running ? '已加入队列，等待执行' : '已加入队列', running ? 'running' : '');
+  startNextQueueBatch();
+}
+
+async function startNextQueueBatch() {
+  if (running || activeQueueItem) return;
+  if (queueStopRequested) {
+    $('btnCancel').disabled = true;
+    renderQueue();
+    setStatus('队列已停止');
+    return;
+  }
+  const item = runQueue.find((entry) => entry.status === 'pending');
+  if (!item) {
+    $('btnCancel').disabled = true;
+    renderQueue();
+    setStatus('空闲');
+    return;
+  }
+
+  activeQueueItem = item;
+  item.status = 'running';
+  item.startedAt = Date.now();
+  item.completedAt = 0;
+  item.failures = 0;
+  item.exitCode = null;
+  item.error = '';
   running = true;
   stdoutBuffer = '';
   stdoutTail = '';
   stderrTail = '';
   currentRunFailures = 0;
-  resetRunRows();
-  setSelectorsLocked(true);
-  setRunningRow(selectedIndexes[0]);
-  $('btnRun').disabled = true;
+  resetRowsForQueueItem(item);
+  activeRunIndexes = new Set(item.selectedIndexes || []);
+  lockActiveQueueRows();
+  setRunningRow(item.selectedIndexes[0]);
+  $('btnRun').disabled = false;
   $('btnCancel').disabled = false;
-  setStatus('运行中', 'running');
+  setStatus(`队列运行中：第 ${item.id} 批`, 'running');
+  renderQueue();
+
   try {
-    await window.huApp.startRun({
-      settings,
-      inputJsonPath,
-      selectedIndexes,
-      titleOverrides: collectTitleOverrides(),
-      contentOverrides: collectContentOverrides()
-    });
+    await window.huApp.startRun(item.payload);
   } catch (error) {
     running = false;
-    resetRunRows();
-    $('btnRun').disabled = false;
+    item.status = 'failed';
+    item.completedAt = Date.now();
+    item.failures = currentRunFailures || 1;
+    item.error = error.message || '启动失败';
+    markUnfinishedActiveRowsFailed();
+    activeQueueItem = null;
+    activeRunIndexes = new Set();
+    updateActiveRunSelectionLocks();
     $('btnCancel').disabled = true;
     setStatus('启动失败', 'error');
     appendLog(`[启动失败] ${error.message}\n`, true);
+    renderQueue();
+    if (!queueStopRequested && runQueue.some((entry) => entry.status === 'pending')) {
+      setTimeout(startNextQueueBatch, 0);
+    }
   }
 }
 
 async function cancelRun() {
-  await window.huApp.cancelRun();
-  appendLog('[停止] 已请求停止当前任务\n');
+  queueStopRequested = true;
+  const stoppedAt = Date.now();
+  let stoppedPending = 0;
+  runQueue.forEach((item) => {
+    if (item.status !== 'pending') return;
+    item.status = 'stopped';
+    item.completedAt = stoppedAt;
+    item.error = '已停止';
+    stoppedPending += 1;
+  });
+  refreshQueueRowLocks();
+  renderQueue();
+  if (running || activeQueueItem) {
+    await window.huApp.cancelRun();
+    setStatus('正在停止整个队列', 'error');
+    appendLog(`[停止] 已请求停止整个队列${stoppedPending ? `，已停止等待任务 ${stoppedPending} 批` : ''}\n`);
+  } else {
+    queueStopRequested = false;
+    $('btnCancel').disabled = true;
+    setStatus('队列已停止');
+    appendLog(`[停止] 队列已停止${stoppedPending ? `，已停止等待任务 ${stoppedPending} 批` : ''}\n`);
+  }
 }
 
 function switchSection(name) {
@@ -1493,6 +4105,7 @@ function switchSection(name) {
     panel.classList.toggle('active', panel.id === `section-${name}`);
   });
   if (name === 'preview') {
+    updatePreviewSetupState();
     schedulePreviewLayoutUpdate();
   }
 }
@@ -1500,6 +4113,12 @@ function switchSection(name) {
 async function init() {
   fillSettings(await window.huApp.loadSettings());
   $('outputDir').value = settings.outputDir || '';
+  renderChanjingAccountOptions();
+  renderRunAccountOptions();
+  await refreshChanjingAssets();
+  refreshPreviewBackground();
+  updatePreviewSetupState();
+  renderQueue();
 
   document.querySelectorAll('.nav-item').forEach((btn) => {
     btn.addEventListener('click', () => switchSection(btn.dataset.section));
@@ -1512,6 +4131,22 @@ async function init() {
   $('clipConfigMenu')?.addEventListener('click', (event) => {
     event.stopPropagation();
   });
+  $('previewVisibilityButton')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    togglePreviewVisibilityOpen();
+  });
+  $('previewVisibilityMenu')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+  });
+  document.querySelectorAll('[data-preview-visibility]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const checked = document.querySelectorAll('[data-preview-visibility]:checked');
+      if (!checked.length) {
+        input.checked = true;
+      }
+      updatePreviewVisibilityFromInputs();
+    });
+  });
   optionalClipFields.forEach((field) => {
     $(field)?.addEventListener('change', syncClipConfigUi);
   });
@@ -1522,7 +4157,10 @@ async function init() {
         .filter((id) => textEffectIds.includes(id));
     });
   });
-  document.addEventListener('click', () => setClipConfigOpen(false));
+  document.addEventListener('click', () => {
+    setClipConfigOpen(false);
+    setPreviewVisibilityOpen(false);
+  });
   $('btnAddPipRule')?.addEventListener('click', () => addPipRuleRow());
   $('btnAddTextEffectKeywordRule')?.addEventListener('click', () => addTextEffectKeywordRuleRow());
   $('pipRuleList')?.addEventListener('click', async (event) => {
@@ -1531,15 +4169,26 @@ async function init() {
       removeButton.closest('[data-pip-rule-row]')?.remove();
       return;
     }
+    const pickFolderButton = event.target.closest('[data-pip-rule-pick-folder]');
+    if (pickFolderButton) {
+      const selected = await window.huApp.chooseDirectory();
+      if (!selected) return;
+      const row = pickFolderButton.closest('[data-pip-rule-row]');
+      const input = row?.querySelector('[data-pip-rule-folder]');
+      if (input) input.value = selected;
+      return;
+    }
     const pickButton = event.target.closest('[data-pip-rule-pick]');
     if (!pickButton) return;
     const selected = await window.huApp.chooseFile({
-      filters: [{ name: 'Video', extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v'] }]
+      filters: [{ name: 'Media', extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'png', 'jpg', 'jpeg', 'webp'] }]
     });
     if (!selected) return;
     const row = pickButton.closest('[data-pip-rule-row]');
     const input = row?.querySelector('[data-pip-rule-video]');
     if (input) input.value = selected;
+    const useSpecified = row?.querySelector('[data-pip-rule-use-video]');
+    if (useSpecified) useSpecified.checked = true;
   });
   $('textEffectKeywordRuleList')?.addEventListener('click', (event) => {
     const removeButton = event.target.closest('[data-text-effect-keyword-rule-remove]');
@@ -1558,8 +4207,13 @@ async function init() {
   $('previewObject').addEventListener('change', () => {
     selectPreviewBox($('previewObject').value);
   });
-  ['previewCurrentX', 'previewCurrentY', 'previewCurrentW', 'previewCurrentH'].forEach((id) => {
+  ['previewCurrentCenterOffsetX', 'previewCurrentW', 'previewCurrentH'].forEach((id) => {
     $(id).addEventListener('input', updateSelectedPreviewBoxFromControls);
+  });
+  $('btnCenterPreviewObject')?.addEventListener('click', () => {
+    const offset = $('previewCurrentCenterOffsetX');
+    if (offset) offset.value = '0';
+    updateSelectedPreviewBoxFromControls();
   });
   ['pipX', 'pipY', 'pipHeight'].forEach((id) => {
     $(id)?.addEventListener('input', () => {
@@ -1569,10 +4223,47 @@ async function init() {
       }
     });
   });
-  $('btnPreviewTitle').addEventListener('click', generatePreviewTitle);
-  $('btnPreviewCaption').addEventListener('click', generatePreviewCaption);
+  $('btnManageAccounts')?.addEventListener('click', openAccountManager);
+  $('btnManageAssets')?.addEventListener('click', openAssetManager);
+  $('btnOpenAddTemplate')?.addEventListener('click', openAddTemplateModal);
+  $('btnOpenTemplateFromEmpty')?.addEventListener('click', openAddTemplateModal);
   $('btnResetPreviewLayout').addEventListener('click', resetPreviewLayoutToDefaults);
   $('btnSavePreviewSettings').addEventListener('click', saveSettings);
+  $('templateSelectionButton')?.addEventListener('click', toggleTemplateSelectionOpen);
+  document.addEventListener('click', (event) => {
+    const dropdown = $('templateSelectionDropdown');
+    if (dropdown && !dropdown.contains(event.target)) {
+      setTemplateSelectionOpen(false);
+    }
+  });
+  document.querySelectorAll('[name="templateSelectionMode"]').forEach((input) => {
+    input.addEventListener('change', handleTemplateSelectionModeChange);
+  });
+  ['runRandomAccountList', 'runRotateAccountList'].forEach((id) => {
+    $(id)?.addEventListener('change', () => {
+      syncRunAccountHiddenFields();
+      const mode = currentAssetSelectionMode();
+      if (
+        (mode === 'random_account' && id === 'runRandomAccountList')
+        || (mode === 'rotate_account' && id === 'runRotateAccountList')
+      ) {
+        applyTemplateModeToRows(mode);
+      } else {
+        syncTemplateSelectionUi();
+      }
+      updatePreviewSetupState();
+    });
+  });
+  $('chanjingAccountIndex')?.addEventListener('change', () => {
+    switchAccountAssetTemplate($('chanjingAccountIndex').value, $('currentTemplateId')?.value || settings.currentTemplateId);
+  });
+  $('currentTemplateId')?.addEventListener('change', () => {
+    switchAccountAssetTemplate($('chanjingAccountIndex')?.value || settings.chanjingAccountIndex || 1, $('currentTemplateId').value);
+  });
+  $('templateSourceAssetIndex')?.addEventListener('change', () => {
+    settings.templateSourceAssetIndex = Number($('templateSourceAssetIndex').value || 0);
+  });
+  $('btnAddTemplateFromAsset')?.addEventListener('click', addTemplateFromSelectedAsset);
   window.addEventListener('resize', updatePreviewLayout);
 
   [
@@ -1591,16 +4282,78 @@ async function init() {
     'disclaimerColor',
     'disclaimerOutlineColor',
     'disclaimerOutlineSize',
-    'disclaimerOpacityPercent'
+    'disclaimerOpacityPercent',
+    'logoOpacityPercent'
   ].forEach((id) => {
-    $(id)?.addEventListener('input', applyPreviewTextStyle);
+    $(id)?.addEventListener('input', () => {
+      syncPreviewStyleControls(id);
+      applyPreviewTextStyle();
+      schedulePreviewLayoutUpdate();
+    });
+  });
+
+  [
+    'titleFontPath',
+    'captionFontPath',
+    'textEffectFontPath',
+    'disclaimerFontPath',
+    'logoFolder',
+    'logoFile',
+    'useLogoFile'
+  ].forEach((id) => {
+    $(id)?.addEventListener('input', () => {
+      syncPreviewStyleControls(id);
+      if (id === 'logoFolder' || id === 'logoFile' || id === 'useLogoFile') {
+        updatePreviewLogo();
+      } else {
+        updatePreviewFonts();
+      }
+      schedulePreviewLayoutUpdate();
+    });
+  });
+
+  document.querySelectorAll('[data-preview-style-target]').forEach((input) => {
+    input.addEventListener('input', () => applyPreviewStyleProxy(input));
+    input.addEventListener('change', () => applyPreviewStyleProxy(input));
+  });
+
+  document.querySelectorAll('[data-preview-pick-font]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const selected = await window.huApp.chooseFile({
+        filters: [{ name: 'Fonts', extensions: ['ttf', 'otf', 'ttc'] }]
+      });
+      if (!selected) return;
+      const target = btn.dataset.previewPickFont;
+      const source = $(target);
+      if (source) source.value = selected;
+      syncPreviewStyleControls(target);
+      updatePreviewFonts();
+      schedulePreviewLayoutUpdate();
+    });
+  });
+
+  document.querySelectorAll('[data-preview-pick-dir]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const selected = await window.huApp.chooseDirectory();
+      if (!selected) return;
+      const target = btn.dataset.previewPickDir;
+      const source = $(target);
+      if (source) source.value = selected;
+      syncPreviewStyleControls(target);
+      updatePreviewLogo();
+      schedulePreviewLayoutUpdate();
+    });
   });
 
   document.querySelectorAll('[data-pick-dir]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const target = btn.dataset.pickDir;
       const selected = await window.huApp.chooseDirectory();
-      if (selected) $(target).value = selected;
+      if (selected) {
+        $(target).value = selected;
+        syncPreviewStyleControls(target);
+        if (target === 'logoFolder') updatePreviewLogo();
+      }
     });
   });
 
@@ -1611,6 +4364,7 @@ async function init() {
       });
       if (selected) {
         $(btn.dataset.pickFont).value = selected;
+        syncPreviewStyleControls(btn.dataset.pickFont);
         updatePreviewFonts();
       }
     });
@@ -1655,33 +4409,66 @@ async function init() {
     });
   });
 
+  document.querySelectorAll('[data-pick-image], [data-preview-pick-image]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const selected = await window.huApp.chooseFile({
+        filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }]
+      });
+      if (!selected) return;
+      const target = btn.dataset.pickImage || btn.dataset.previewPickImage;
+      const source = $(target);
+      if (source) source.value = selected;
+      if (target === 'logoFile' && $('useLogoFile')) {
+        $('useLogoFile').checked = true;
+      }
+      syncPreviewStyleControls(target);
+      syncPreviewStyleControls('useLogoFile');
+      updatePreviewLogo();
+      schedulePreviewLayoutUpdate();
+    });
+  });
+
   $('btnLoadJson').addEventListener('click', async () => {
     const selected = await window.huApp.chooseFile({
       filters: [{ name: 'JSON', extensions: ['json'] }]
     });
     if (!selected) return;
     inputJsonPath = selected;
-    $('inputJsonPath').value = selected;
+    const selectedJsonName = $('selectedJsonName');
+    if (selectedJsonName) {
+      selectedJsonName.textContent = selected.split(/[\\/]/).pop() || selected;
+      selectedJsonName.title = selected;
+    }
     try {
       contentOverrides = {};
       renderSummary(await window.huApp.readJsonSummary(selected));
       generatePreviewTitle();
       generatePreviewCaption();
+      refreshPreviewBackground();
       appendLog(`[导入] ${selected}\n`);
     } catch (error) {
       appendLog(`[JSON 错误] ${error.message}\n`, true);
       renderSummary(null);
+      refreshPreviewBackground();
     }
   });
+  $('btnCustomText')?.addEventListener('click', openCustomTextEditor);
 
   $('btnSaveSettings').addEventListener('click', saveSettings);
+  $('btnExportSettings')?.addEventListener('click', exportSettingsConfig);
+  $('btnImportSettings')?.addEventListener('click', importSettingsConfig);
   $('btnSaveStyleSettings').addEventListener('click', saveSettings);
   $('btnRun').addEventListener('click', startRun);
   $('btnCancel').addEventListener('click', cancelRun);
+  $('queueList')?.addEventListener('click', (event) => {
+    const remove = event.target.closest('[data-queue-remove]');
+    if (!remove) return;
+    removeQueueItem(remove.dataset.queueRemove);
+  });
   $('selectAllRows').addEventListener('change', () => {
     const checked = $('selectAllRows').checked;
     document.querySelectorAll('[data-row-select]').forEach((el) => {
-      el.checked = checked;
+      if (!el.disabled) el.checked = checked;
     });
     updateSelectedCount();
     updateSelectAllState();
@@ -1693,8 +4480,81 @@ async function init() {
   $('btnCloseContentModal').addEventListener('click', closeContentEditor);
   $('btnCancelContentEdit').addEventListener('click', closeContentEditor);
   $('btnSaveContentEdit').addEventListener('click', saveContentEditor);
-  $('contentModal').addEventListener('click', (event) => {
-    if (event.target === $('contentModal')) closeContentEditor();
+  $('customTextEditor')?.addEventListener('input', updateCustomTextCharCount);
+  $('btnCloseCustomTextModal')?.addEventListener('click', closeCustomTextEditor);
+  $('btnCancelCustomText')?.addEventListener('click', closeCustomTextEditor);
+  $('btnSaveCustomText')?.addEventListener('click', saveCustomTextEditor);
+  $('btnCloseAccountModal')?.addEventListener('click', closeAccountManager);
+  $('btnCancelAccountEdit')?.addEventListener('click', closeAccountManager);
+  $('btnAddAccount')?.addEventListener('click', addAccountRow);
+  $('btnSaveAccountEdit')?.addEventListener('click', saveAccountManager);
+  $('accountList')?.addEventListener('click', (event) => {
+    const rename = event.target.closest('[data-account-rename]');
+    if (rename) {
+      toggleAccountRename(rename.closest('.account-row'));
+      return;
+    }
+    const remove = event.target.closest('[data-account-remove]');
+    if (!remove) return;
+    removeAccountRow(Number(remove.dataset.accountRemove || 0));
+  });
+  $('btnCloseAssetModal')?.addEventListener('click', closeAssetManager);
+  $('btnCancelAssetEdit')?.addEventListener('click', closeAssetManager);
+  $('btnSaveAssetEdit')?.addEventListener('click', saveAssetManager);
+  $('assetAccountFilter')?.addEventListener('change', handleTemplateManagerAccountFilterChange);
+  $('btnCloseAssetAddModal')?.addEventListener('click', closeAddTemplateModal);
+  $('btnCancelAssetManagerAdd')?.addEventListener('click', closeAddTemplateModal);
+  $('assetManagerSourceAssetIndex')?.addEventListener('change', () => {
+    updateAssetManagerSourcePreview();
+    updateAssetManagerAddButtonState();
+  });
+  $('btnOpenAddAllTemplates')?.addEventListener('click', openAddAllTemplatesModal);
+  $('btnCloseAssetAddAllModal')?.addEventListener('click', cancelAddAllTemplatesModal);
+  $('btnCancelAddAllTemplates')?.addEventListener('click', cancelAddAllTemplatesModal);
+  $('btnConfirmAddAllTemplates')?.addEventListener('click', addAllTemplatesFromButton);
+  $('assetAddAllAccountIndex')?.addEventListener('change', handleAssetAddAllAccountChange);
+  $('btnAssetAddAllAddAccount')?.addEventListener('click', confirmAssetAddAllNewAccount);
+  $('btnAssetAddAllCancelAccount')?.addEventListener('click', cancelAssetAddAllNewAccount);
+  $('assetAddAllNewAccountName')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      confirmAssetAddAllNewAccount();
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancelAssetAddAllNewAccount();
+    }
+  });
+  $('assetManagerTemplateAccountIndex')?.addEventListener('change', handleAssetManagerTemplateAccountChange);
+  $('btnAssetManagerAddAccount')?.addEventListener('click', confirmAssetManagerNewAccount);
+  $('btnAssetManagerCancelAccount')?.addEventListener('click', cancelAssetManagerNewAccount);
+  $('assetManagerNewAccountName')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      confirmAssetManagerNewAccount();
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancelAssetManagerNewAccount();
+    }
+  });
+  $('btnAssetManagerAddTemplate')?.addEventListener('click', addTemplateRowInManager);
+  $('assetList')?.addEventListener('click', (event) => {
+    const rename = event.target.closest('[data-template-rename]');
+    if (rename) {
+      toggleTemplateRename(rename.closest('[data-template-id]'));
+      return;
+    }
+    const remove = event.target.closest('[data-template-remove]');
+    if (!remove) return;
+    templateManagerDraftConfigs.delete(remove.dataset.templateRemove || '');
+    remove.closest('[data-template-id]')?.remove();
+    renumberTemplateManagerRows();
+    if (!$('assetList')?.querySelector('[data-template-id]')) {
+      $('assetList').innerHTML = '';
+    }
+    const hint = $('assetModalHint');
+    if (hint) hint.textContent = '模板已从列表移除，点击保存模板后生效。';
   });
   generatePreviewTitle();
   generatePreviewCaption();
@@ -1709,6 +4569,8 @@ async function init() {
   });
   window.huApp.onDone((data) => {
     running = false;
+    const finishedQueueItem = activeQueueItem;
+    const stopRequested = queueStopRequested;
     if (rowClockTimer) {
       clearInterval(rowClockTimer);
       rowClockTimer = null;
@@ -1721,7 +4583,10 @@ async function init() {
     updateSelectAllState();
     $('btnRun').disabled = false;
     $('btnCancel').disabled = true;
-    if (data.code === 0) {
+    if (stopRequested) {
+      setStatus('队列已停止');
+      appendLog('[停止] 队列已停止\n');
+    } else if (data.code === 0) {
       setStatus(currentRunFailures ? `完成，失败 ${currentRunFailures} 条` : '完成', currentRunFailures ? 'error' : '');
       if (!currentRunFailures) {
         appendLog('[完成] 全部成功\n');
@@ -1735,6 +4600,31 @@ async function init() {
       if (stdoutTail.trim()) {
         appendLog(`[运行尾部]\n${stdoutTail.trim()}\n`, true);
       }
+    }
+    if (finishedQueueItem) {
+      const failed = !stopRequested && (data.code !== 0 || currentRunFailures > 0);
+      if (failed) {
+        markUnfinishedActiveRowsFailed();
+      } else if (stopRequested) {
+        markUnfinishedActiveRowsFailed();
+      }
+      finishedQueueItem.status = stopRequested ? 'stopped' : (failed ? 'failed' : 'done');
+      finishedQueueItem.completedAt = Date.now();
+      finishedQueueItem.failures = currentRunFailures;
+      finishedQueueItem.exitCode = data.code;
+      finishedQueueItem.error = stopRequested ? '已停止' : (data.error || '');
+      activeQueueItem = null;
+      activeRunIndexes = new Set();
+      updateActiveRunSelectionLocks();
+      renderQueue();
+      if (stopRequested) {
+        queueStopRequested = false;
+        setStatus('队列已停止');
+      } else if (runQueue.some((item) => item.status === 'pending')) {
+        setTimeout(startNextQueueBatch, 0);
+      }
+    } else {
+      renderQueue();
     }
   });
 }

@@ -18,14 +18,17 @@
         </div>
         <nav class="nav">
           <button class="nav-item active" data-section="run">任务</button>
-          <button class="nav-item" data-section="preview">预览</button>
-          <button class="nav-item" data-section="settings">设置</button>
+          <button class="nav-item" data-section="queue">队列</button>
+          <button class="nav-item" data-section="preview">模板管理</button>
           <button class="nav-item" data-section="style">风格</button>
-          <button class="nav-item" data-section="logs">日志</button>
+          <button class="nav-item" data-section="settings">设置</button>
         </nav>
-        <div class="status-card">
-          <span class="status-dot" id="statusDot"></span>
-          <span id="statusText">空闲</span>
+        <div class="sidebar-bottom">
+          <button class="nav-item sidebar-log-item" data-section="logs">日志</button>
+          <div class="status-card">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">空闲</span>
+          </div>
         </div>
       </aside>
 
@@ -37,7 +40,32 @@
               <p class="muted">导入 JSON 后按顺序生成 raw，再按当前配置剪辑输出。</p>
             </div>
             <div class="toolbar-actions">
-              <button id="btnLoadJson" class="button secondary">选择 JSON</button>
+              <div id="templateSelectionDropdown" class="template-mode-dropdown">
+                <input id="assetSelectionMode" type="hidden" value="random_account" />
+                <button id="templateSelectionButton" class="button secondary template-mode-button" type="button" aria-expanded="false">
+                  <span id="templateSelectionText">模板选择方式</span>
+                  <span class="clip-config-caret">▼</span>
+                </button>
+                <div id="templateSelectionMenu" class="template-mode-menu" hidden>
+                  <input id="runChanjingAccountIndex" type="hidden" value="1" />
+                  <input id="runRandomAccountIndexes" type="hidden" value="1" />
+                  <input id="runRotateAccountIndexes" type="hidden" value="1" />
+                  <label>
+                    <input name="templateSelectionMode" type="radio" value="random_account" checked />
+                    <span>指定账号随机模板</span>
+                  </label>
+                  <div id="runRandomAccountList" class="template-account-checks"></div>
+                  <label>
+                    <input name="templateSelectionMode" type="radio" value="rotate_account" />
+                    <span>指定账号轮换模板</span>
+                  </label>
+                  <div id="runRotateAccountList" class="template-account-checks"></div>
+                  <label>
+                    <input name="templateSelectionMode" type="radio" value="random_all" />
+                    <span>所有账号所有模板全部随机</span>
+                  </label>
+                </div>
+              </div>
               <button id="btnRun" class="button primary">开始出片</button>
               <button id="btnCancel" class="button danger" disabled>停止</button>
             </div>
@@ -45,9 +73,11 @@
 
           <div class="grid two">
             <div class="field">
-              <label>JSON 文件</label>
-              <div class="path-row">
-                <input id="inputJsonPath" readonly placeholder="请选择任务 JSON" />
+              <label>文案文件</label>
+              <div class="path-row json-file-row">
+                <button id="btnLoadJson" class="button secondary" type="button">选择生成文案</button>
+                <button id="btnCustomText" class="button secondary" type="button">自定义文案</button>
+                <span id="selectedJsonName" class="selected-json-name" title="">未选择文案</span>
               </div>
             </div>
             <div class="field">
@@ -73,16 +103,17 @@
                   <label class="required-clip"><input id="clipTitle" type="checkbox" checked disabled />标题</label>
                   <label class="required-clip"><input id="clipCaption" type="checkbox" checked disabled />字幕</label>
                   <label class="required-clip"><input id="clipBgm" type="checkbox" checked disabled />BGM</label>
+                  <label><input id="hideCtaCaptions" type="checkbox" />隐藏CTA字幕</label>
                   <label><input id="clipTitleMotion" type="checkbox" />标题动画</label>
                   <label><input id="clipIntro" type="checkbox" />身份背书</label>
                   <label><input id="clipPatent" type="checkbox" />专利</label>
                   <label><input id="clipPip" type="checkbox" />画中画</label>
                   <label><input id="clipTextEffects" type="checkbox" />花字</label>
+                  <label><input id="clipLogo" type="checkbox" />Logo</label>
                 </div>
               </div>
               <span>剪辑配置</span>
             </div>
-            <div><strong>必跑</strong><span>模型字幕审查</span></div>
           </div>
 
           <div class="table-wrap">
@@ -91,6 +122,7 @@
                 <tr>
                   <th class="select-col"><input id="selectAllRows" type="checkbox" checked /></th>
                   <th>#</th>
+                  <th class="asset-cell" data-asset-column>账号模板</th>
                   <th>编号</th>
                   <th>主题</th>
                   <th>标题</th>
@@ -100,38 +132,84 @@
                 </tr>
               </thead>
               <tbody id="itemsTable">
-                <tr><td colspan="8" class="empty">还没有导入任务</td></tr>
+                <tr><td colspan="9" class="empty">还没有导入任务</td></tr>
               </tbody>
             </table>
+          </div>
+        </section>
+
+        <section id="section-queue" class="panel">
+          <div class="toolbar">
+            <div>
+              <h2>队列</h2>
+              <p class="muted">任务页每次勾选后点击开始出片，会作为一批加入队列，上一批完成后自动开始下一批。</p>
+            </div>
+          </div>
+
+          <div class="queue-summary">
+            <div><strong id="queuePendingCount">0</strong><span>等待</span></div>
+            <div><strong id="queueRunningCount">0</strong><span>进行中</span></div>
+            <div><strong id="queueDoneCount">0</strong><span>已完成</span></div>
+            <div><strong id="queueFailedCount">0</strong><span>失败</span></div>
+          </div>
+
+          <div id="queueList" class="queue-list">
+            <div class="queue-empty">还没有加入队列的任务</div>
           </div>
         </section>
 
         <section id="section-preview" class="panel">
           <div class="toolbar">
             <div>
-              <h2>预览</h2>
-              <p class="muted">生成标题和字幕预览，拖动或拉伸画面里的文字区域后保存。</p>
+              <h2>模板管理</h2>
+              <p class="muted">选择模板后，拖动或拉伸画面里的文字区域并保存。</p>
             </div>
             <div class="toolbar-actions">
-              <button id="btnPreviewTitle" class="button secondary" type="button">标题生成</button>
-              <button id="btnPreviewCaption" class="button secondary" type="button">字幕生成</button>
-              <button id="btnResetPreviewLayout" class="button secondary" type="button">恢复默认布局</button>
-              <button id="btnSavePreviewSettings" class="button primary" type="button">保存预览</button>
+              <button id="btnManageAccounts" class="button secondary" type="button">账号管理</button>
+              <button id="btnManageAssets" class="button secondary" type="button">模板管理</button>
             </div>
           </div>
 
-          <div class="preview-layout">
-            <div class="preview-stage-card">
-              <div id="previewFrame" class="preview-frame">
-                <div class="preview-video-bg"></div>
+          <div id="previewMissingState" class="preview-missing-state" hidden>
+            <div class="preview-missing-content">
+              <div>请添加模板</div>
+              <button id="btnOpenTemplateFromEmpty" class="button primary" type="button">新建模板</button>
+            </div>
+          </div>
+
+          <div class="preview-scroll">
+            <div class="settings-card preview-template-bar">
+              <div class="field">
+                <label>账号</label>
+                <select id="chanjingAccountIndex">
+                  <option value="1">账号1</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>账号模板</label>
+                <select id="currentTemplateId">
+                  <option value="1">模板1</option>
+                </select>
+                <input id="chanjingAssetIndex" type="hidden" />
+              </div>
+              <p id="chanjingAssetHint" class="hint preview-template-hint">用于编辑当前账号下的模板布局。</p>
+            </div>
+
+            <div class="preview-layout">
+              <div class="preview-stage-card">
+                <div id="previewFrame" class="preview-frame">
+                <div id="previewVideoBg" class="preview-video-bg">
+                  <img id="previewBgImage" class="preview-bg-media" alt="" hidden />
+                  <video id="previewBgVideo" class="preview-bg-media" muted playsinline preload="metadata" hidden></video>
+                </div>
                 <div id="previewTitleBox" class="preview-box preview-title-box" data-preview-box="title">
-                  <div class="preview-title-line preview-title-top">糖尿病花钱多</div>
-                  <div class="preview-title-line preview-title-middle">药也越来越多</div>
-                  <div class="preview-title-line preview-title-bottom">先看原因</div>
+                  <div class="preview-title-line preview-title-top">糖尿病血糖高</div>
+                  <div class="preview-title-line preview-title-middle">胰岛要先看</div>
+                  <div class="preview-title-line preview-title-bottom">今天讲明白</div>
                   <span class="preview-resize-handle"></span>
                 </div>
                 <div id="previewCaptionBox" class="preview-box preview-caption-box" data-preview-box="caption">
-                  <div id="previewCaptionText">很多糖友嘴上不说<br />其实最担心的是花钱多</div>
+                  <div id="previewCaptionText">很多糖友一看血糖高<br />就问是不是药不够</div>
                   <span class="preview-resize-handle"></span>
                 </div>
                 <div id="previewTextEffectBox" class="preview-box preview-text-effect-box" data-preview-box="textEffect">
@@ -142,6 +220,11 @@
                   <span>画中画</span>
                   <span class="preview-resize-handle preview-pip-resize-handle"></span>
                 </div>
+                <div id="previewLogoBox" class="preview-box preview-logo-box" data-preview-box="logo">
+                  <img id="previewLogoImage" alt="" hidden />
+                  <span id="previewLogoPlaceholder">Logo</span>
+                  <span class="preview-resize-handle"></span>
+                </div>
                 <div id="previewDisclaimerBox" class="preview-box preview-disclaimer-box" data-preview-box="disclaimer">
                   <div id="previewDisclaimerText">所有内容来自官方信息公示<br />仅做咨询分享无不良引导<br />如有不适请及时就医</div>
                   <span class="preview-resize-handle"></span>
@@ -150,7 +233,7 @@
             </div>
 
             <div class="settings-card preview-controls">
-              <h3>位置尺寸</h3>
+              <h3>对象设置</h3>
               <div class="field">
                 <label>当前对象</label>
                 <select id="previewObject">
@@ -158,29 +241,167 @@
                   <option value="caption">字幕</option>
                   <option value="textEffect">花字限制</option>
                   <option value="pip">画中画</option>
+                  <option value="logo">Logo</option>
                   <option value="disclaimer">底部声明</option>
                 </select>
               </div>
-              <div class="grid two compact">
-                <div class="field">
-                  <label>X</label>
-                  <input id="previewCurrentX" type="number" min="0" max="1080" />
-                </div>
-                <div class="field">
-                  <label>Y</label>
-                  <input id="previewCurrentY" type="number" min="0" max="1920" />
-                </div>
-                <div class="field">
-                  <label>宽</label>
-                  <input id="previewCurrentW" type="number" min="80" max="1080" />
-                </div>
-                <div class="field">
-                  <label>高</label>
-                  <input id="previewCurrentH" type="number" min="40" max="1920" />
+              <div class="field">
+                <label>预览显示对象</label>
+                <div id="previewVisibilityDropdown" class="preview-visibility-dropdown">
+                  <button id="previewVisibilityButton" class="summary-select clip-config-button" type="button" aria-expanded="false">
+                    <span id="previewVisibilityText">标题+字幕+花字+画中画+Logo+底部声明</span>
+                    <span class="clip-config-caret">▾</span>
+                  </button>
+                  <div id="previewVisibilityMenu" class="clip-config-menu preview-visibility-menu" hidden>
+                    <label><input type="checkbox" data-preview-visibility="title" checked />标题</label>
+                    <label><input type="checkbox" data-preview-visibility="caption" checked />字幕</label>
+                    <label><input type="checkbox" data-preview-visibility="textEffect" checked />花字限制</label>
+                    <label><input type="checkbox" data-preview-visibility="pip" checked />画中画</label>
+                    <label><input type="checkbox" data-preview-visibility="logo" checked />Logo</label>
+                    <label><input type="checkbox" data-preview-visibility="disclaimer" checked />底部声明</label>
+                  </div>
                 </div>
               </div>
-              <p class="hint">拖动改变位置，拖右下角改变大小；画中画只调高度，宽度按 16:9 自动计算。</p>
+              <div class="preview-position-grid">
+                <div class="field preview-offset-field">
+                  <label>横向居中偏差</label>
+                  <div class="inline-input-button">
+                    <input id="previewCurrentCenterOffsetX" type="number" min="-540" max="540" />
+                    <button id="btnCenterPreviewObject" class="button secondary small" type="button">居中</button>
+                  </div>
+                </div>
+                <div class="preview-size-row">
+                  <div class="field">
+                    <label>宽</label>
+                    <input id="previewCurrentW" type="number" min="80" max="1080" />
+                  </div>
+                  <div class="field">
+                    <label>高</label>
+                    <input id="previewCurrentH" type="number" min="40" max="1920" />
+                  </div>
+                </div>
+              </div>
+              <p class="hint">负数偏左，正数偏右，0 表示水平居中；上下位置直接拖动画面调整。</p>
+
+              <div class="preview-object-style" data-preview-style-panel="title">
+                <h4>标题样式</h4>
+                <div class="field">
+                  <label>标题字体文件</label>
+                  <div class="path-row">
+                    <input data-preview-style-target="titleFontPath" />
+                    <button class="icon-button" type="button" data-preview-pick-font="titleFontPath" title="选择字体">...</button>
+                  </div>
+                </div>
+                <div class="object-style-grid title-style-grid">
+                  <span class="style-head">行</span>
+                  <span class="style-head">字体颜色</span>
+                  <span class="style-head">描边颜色</span>
+                  <span class="style-head">描边大小</span>
+                  <label>上</label>
+                  <input data-preview-style-target="titleTopColor" type="color" />
+                  <input data-preview-style-target="titleTopOutlineColor" type="color" />
+                  <input data-preview-style-target="titleTopOutlineSize" type="number" min="0" max="80" />
+                  <label>中</label>
+                  <input data-preview-style-target="titleMiddleColor" type="color" />
+                  <input data-preview-style-target="titleMiddleOutlineColor" type="color" />
+                  <input data-preview-style-target="titleMiddleOutlineSize" type="number" min="0" max="80" />
+                  <label>下</label>
+                  <input data-preview-style-target="titleBottomColor" type="color" />
+                  <input data-preview-style-target="titleBottomOutlineColor" type="color" />
+                  <input data-preview-style-target="titleBottomOutlineSize" type="number" min="0" max="80" />
+                </div>
+              </div>
+
+              <div class="preview-object-style" data-preview-style-panel="caption">
+                <h4>字幕样式</h4>
+                <div class="field">
+                  <label>字幕字体文件</label>
+                  <div class="path-row">
+                    <input data-preview-style-target="captionFontPath" />
+                    <button class="icon-button" type="button" data-preview-pick-font="captionFontPath" title="选择字体">...</button>
+                  </div>
+                </div>
+                <div class="object-style-grid">
+                  <span class="style-head">字体颜色</span>
+                  <span class="style-head">描边颜色</span>
+                  <span class="style-head">描边大小</span>
+                  <input data-preview-style-target="captionColor" type="color" />
+                  <input data-preview-style-target="captionOutlineColor" type="color" />
+                  <input data-preview-style-target="captionOutlineSize" type="number" min="0" max="80" />
+                </div>
+              </div>
+
+              <div class="preview-object-style" data-preview-style-panel="textEffect">
+                <h4>花字样式</h4>
+                <div class="field">
+                  <label>花字字体文件</label>
+                  <div class="path-row">
+                    <input data-preview-style-target="textEffectFontPath" />
+                    <button class="icon-button" type="button" data-preview-pick-font="textEffectFontPath" title="选择字体">...</button>
+                  </div>
+                </div>
+                <div class="object-style-grid">
+                  <span class="style-head">字体颜色</span>
+                  <span class="style-head">描边颜色</span>
+                  <span class="style-head">描边大小</span>
+                  <input data-preview-style-target="captionColor" type="color" />
+                  <input data-preview-style-target="captionOutlineColor" type="color" />
+                  <input data-preview-style-target="captionOutlineSize" type="number" min="0" max="80" />
+                </div>
+              </div>
+
+              <div class="preview-object-style" data-preview-style-panel="disclaimer">
+                <h4>底部声明样式</h4>
+                <div class="field">
+                  <label>底部声明字体文件</label>
+                  <div class="path-row">
+                    <input data-preview-style-target="disclaimerFontPath" />
+                    <button class="icon-button" type="button" data-preview-pick-font="disclaimerFontPath" title="选择字体">...</button>
+                  </div>
+                </div>
+                <div class="object-style-grid">
+                  <span class="style-head">字体颜色</span>
+                  <span class="style-head">描边颜色</span>
+                  <span class="style-head">描边大小</span>
+                  <input data-preview-style-target="disclaimerColor" type="color" />
+                  <input data-preview-style-target="disclaimerOutlineColor" type="color" />
+                  <input data-preview-style-target="disclaimerOutlineSize" type="number" min="0" max="80" />
+                </div>
+                <div class="field">
+                  <label>不透明度（%）</label>
+                  <input data-preview-style-target="disclaimerOpacityPercent" type="number" min="0" max="100" />
+                </div>
+              </div>
+
+              <div class="preview-object-style" data-preview-style-panel="pip">
+                <h4>画中画</h4>
+                <p class="hint">画中画没有字体样式；宽度按 16:9 自动计算，只调整高度和水平偏差。</p>
+              </div>
+
+              <div class="preview-object-style" data-preview-style-panel="logo">
+                <h4>Logo</h4>
+                <div class="field">
+                  <label>Logo 文件夹</label>
+                  <div class="path-row">
+                    <input data-preview-style-target="logoFolder" />
+                    <button class="icon-button" type="button" data-preview-pick-dir="logoFolder" title="选择目录">...</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>Logo 图片</label>
+                  <div class="path-row with-toggle">
+                    <input data-preview-style-target="logoFile" />
+                    <button class="icon-button" type="button" data-preview-pick-image="logoFile" title="选择图片">...</button>
+                    <label class="inline-check"><input data-preview-style-target="useLogoFile" type="checkbox" /><span>使用指定</span></label>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>不透明度（%）</label>
+                  <input data-preview-style-target="logoOpacityPercent" type="number" min="0" max="100" />
+                </div>
+              </div>
             </div>
+          </div>
           </div>
 
           <input id="previewTitleX" type="hidden" />
@@ -203,6 +424,14 @@
           <input id="previewPipY" type="hidden" />
           <input id="previewPipW" type="hidden" />
           <input id="previewPipH" type="hidden" />
+          <input id="previewLogoX" type="hidden" />
+          <input id="previewLogoY" type="hidden" />
+          <input id="previewLogoW" type="hidden" />
+          <input id="previewLogoH" type="hidden" />
+          <div class="preview-footer">
+            <button id="btnResetPreviewLayout" class="button secondary" type="button">恢复默认布局</button>
+            <button id="btnSavePreviewSettings" class="button primary" type="button">保存预览</button>
+          </div>
         </section>
 
         <section id="section-settings" class="panel">
@@ -285,6 +514,15 @@
               </div>
               <p class="hint">最多处理条数填 0 表示处理 JSON 里的全部 items。</p>
             </div>
+
+            <div class="settings-card settings-export-card">
+              <h3>配置备份</h3>
+              <p class="hint">导出会包含账号、模板、模板布局、风格路径、API 配置和所有参数。</p>
+              <div class="settings-export-actions">
+                <button id="btnExportSettings" class="button secondary" type="button">导出配置</button>
+                <button id="btnImportSettings" class="button secondary" type="button">导入配置</button>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -298,7 +536,7 @@
           </div>
 
           <div class="settings-grid">
-            <div class="settings-card">
+            <div class="settings-card style-source-card">
               <h3>字体</h3>
               <div class="field">
                 <label>标题字体文件</label>
@@ -421,6 +659,30 @@
             </div>
 
             <div class="settings-card">
+              <h3>Logo</h3>
+              <div class="field">
+                <label>Logo 文件夹</label>
+                <div class="path-row">
+                  <input id="logoFolder" />
+                  <button class="icon-button" data-pick-dir="logoFolder" title="选择目录">...</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>指定 Logo 图片</label>
+                <div class="path-row with-toggle">
+                  <input id="logoFile" />
+                  <button class="icon-button" data-pick-image="logoFile" title="选择图片">...</button>
+                  <label class="inline-check"><input id="useLogoFile" type="checkbox" /><span>使用指定</span></label>
+                </div>
+              </div>
+              <div class="field">
+                <label>Logo 不透明度（%）</label>
+                <input id="logoOpacityPercent" type="number" min="0" max="100" step="1" />
+              </div>
+              <p class="hint">勾选剪辑配置里的 Logo 后，使用指定图片；取消“使用指定”则从 Logo 文件夹随机选一张。</p>
+            </div>
+
+            <div class="settings-card">
               <h3>画中画</h3>
               <div class="field">
                 <label>素材文件夹</label>
@@ -488,7 +750,7 @@
               <p class="hint">前端先保存触发关键词；后端接入后会用命中的分行后字幕单行做花字。</p>
             </div>
 
-            <div class="settings-card">
+            <div class="settings-card style-source-card">
               <h3>文字样式</h3>
               <div class="style-grid">
                 <span class="style-head">对象</span>
@@ -520,6 +782,11 @@
                 <input id="disclaimerColor" type="color" />
                 <input id="disclaimerOutlineColor" type="color" />
                 <input id="disclaimerOutlineSize" type="number" min="0" max="80" />
+              </div>
+              <div class="field">
+                <label>字幕缓冲时间（秒）</label>
+                <input id="captionBufferSeconds" type="number" min="0" max="0.5" step="0.01" />
+                <p class="hint">上一段字幕会提前结束这段时间，默认 0.12 秒。</p>
               </div>
               <div class="field">
                 <label>底部声明不透明度（%）</label>
@@ -556,6 +823,142 @@
         <div class="modal-actions">
           <button id="btnCancelContentEdit" class="button secondary" type="button">取消</button>
           <button id="btnSaveContentEdit" class="button primary" type="button">保存内容</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="customTextModal" class="modal-backdrop" hidden>
+      <div class="modal">
+        <div class="modal-header">
+          <h3>自定义文案</h3>
+          <button id="btnCloseCustomTextModal" class="icon-button" type="button" title="关闭">×</button>
+        </div>
+        <textarea id="customTextEditor" class="content-editor" rows="15" placeholder="粘贴文案：空行分组；每组第一行较短会作为标题；没有标题时自动用前三句整理三行标题。"></textarea>
+        <div class="modal-meta">
+          <span id="customTextHint">正文只做标点规范，不改文字内容。</span>
+          <span id="customTextCharCount">0 字</span>
+        </div>
+        <div class="modal-actions">
+          <button id="btnCancelCustomText" class="button secondary" type="button">取消</button>
+          <button id="btnSaveCustomText" class="button primary" type="button">生成任务</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="accountModal" class="modal-backdrop" hidden>
+      <div class="modal account-modal">
+        <div class="modal-header">
+          <h3>账号管理</h3>
+          <button id="btnCloseAccountModal" class="icon-button" type="button" title="关闭">×</button>
+        </div>
+        <div id="accountList" class="account-list"></div>
+        <div class="modal-meta">
+          <span id="accountModalHint">账号名称会用于模板选择显示。</span>
+          <button id="btnAddAccount" class="button secondary small" type="button">添加账号</button>
+        </div>
+        <div class="modal-actions">
+          <button id="btnCancelAccountEdit" class="button secondary" type="button">取消</button>
+          <button id="btnSaveAccountEdit" class="button primary" type="button">保存账号</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="assetModal" class="modal-backdrop" hidden>
+      <div class="modal asset-modal">
+        <div class="modal-header">
+          <h3>模板管理</h3>
+          <button id="btnCloseAssetModal" class="icon-button" type="button" title="关闭">×</button>
+        </div>
+        <div id="assetAccountFilter" class="template-account-filter" hidden></div>
+        <div id="assetList" class="asset-list"></div>
+        <div class="modal-meta">
+          <span id="assetModalHint">模板会显示在账号模板下拉里。</span>
+        </div>
+        <div class="modal-actions asset-modal-actions">
+          <button id="btnCancelAssetEdit" class="button secondary" type="button">取消</button>
+          <div class="modal-action-group">
+            <button id="btnOpenAddTemplate" class="button primary" type="button">添加模板</button>
+            <button id="btnSaveAssetEdit" class="button primary" type="button">保存模板</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="assetAddModal" class="modal-backdrop" hidden>
+      <div class="modal asset-modal">
+        <div class="modal-header">
+          <h3>添加模板</h3>
+          <button id="btnCloseAssetAddModal" class="icon-button" type="button" title="关闭">×</button>
+        </div>
+        <div id="assetManagerAddPanel" class="template-add-panel">
+          <div class="field">
+            <label>模板人物形象</label>
+            <select id="assetManagerSourceAssetIndex">
+              <option value="">请选择模板人物形象</option>
+            </select>
+          </div>
+          <div class="template-preview-card">
+            <div class="template-preview-media">
+              <img id="assetManagerPreviewImage" alt="" hidden />
+              <video id="assetManagerPreviewVideo" muted playsinline preload="metadata" hidden></video>
+              <span id="assetManagerPreviewPlaceholder">选择模板人物形象后预览</span>
+            </div>
+            <div class="template-preview-info">
+              <strong id="assetManagerPreviewName">未选择模板人物形象</strong>
+              <span id="assetManagerPreviewMeta">先看预览，再确认是否添加。</span>
+            </div>
+          </div>
+          <div class="template-account-picker">
+            <div class="field">
+              <label>归属账号</label>
+              <select id="assetManagerTemplateAccountIndex">
+                <option value="">请选择归属账号</option>
+              </select>
+              <div id="assetManagerNewAccountPanel" class="inline-create-row" hidden>
+                <input id="assetManagerNewAccountName" placeholder="账号名称" />
+                <button id="btnAssetManagerAddAccount" class="button secondary small" type="button">确认</button>
+                <button id="btnAssetManagerCancelAccount" class="button secondary small" type="button">取消</button>
+              </div>
+            </div>
+          </div>
+          <div class="template-add-actions">
+            <button id="btnCancelAssetManagerAdd" class="button secondary" type="button">取消</button>
+            <button id="btnOpenAddAllTemplates" class="button secondary" type="button">一键添加所有模板</button>
+            <button id="btnAssetManagerAddTemplate" class="button primary" type="button">确认添加模板</button>
+          </div>
+        </div>
+        <div class="modal-meta">
+          <span id="assetAddHint">选择模板人物形象和归属账号，确认后会自动保存并返回模板预览。</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="assetAddAllModal" class="modal-backdrop" hidden>
+      <div class="modal asset-modal">
+        <div class="modal-header">
+          <h3>一键补全所有模板</h3>
+          <button id="btnCloseAssetAddAllModal" class="icon-button" type="button" title="关闭">×</button>
+        </div>
+        <div class="template-add-panel">
+          <div class="field">
+            <label>选择账号</label>
+            <select id="assetAddAllAccountIndex">
+              <option value="">请选择账号</option>
+            </select>
+            <div id="assetAddAllNewAccountPanel" class="inline-create-row" hidden>
+              <input id="assetAddAllNewAccountName" placeholder="账号名称" />
+              <button id="btnAssetAddAllAddAccount" class="button secondary small" type="button">确认</button>
+              <button id="btnAssetAddAllCancelAccount" class="button secondary small" type="button">取消</button>
+            </div>
+          </div>
+          <p class="hint">会把所有数字人形象补全为该账号下的模板；已存在的同形象模板会自动跳过。</p>
+          <div class="template-add-actions">
+            <button id="btnCancelAddAllTemplates" class="button secondary" type="button">取消</button>
+            <button id="btnConfirmAddAllTemplates" class="button primary" type="button">确认一键添加</button>
+          </div>
+        </div>
+        <div class="modal-meta">
+          <span id="assetAddAllHint">先选择账号，再确认补全所有模板。</span>
         </div>
       </div>
     </div>

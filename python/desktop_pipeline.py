@@ -318,6 +318,30 @@ def effect_enabled(settings, key):
     return clip_enabled(settings, key, False)
 
 
+def hide_cta_captions(settings):
+    return clip_enabled(settings or {}, "hideCtaCaptions", False)
+
+
+def safe_output_subdir(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", text)
+    text = re.sub(r"\s+", "_", text).strip(" ._")
+    return text[:80] or ""
+
+
+def subtitle_units(units, settings):
+    hide_cta = hide_cta_captions(settings)
+    return [
+        unit
+        for unit in units
+        if unit.get("source") != "title"
+        and unit.get("visible")
+        and not (hide_cta and unit.get("source") == "cta")
+    ]
+
+
 def selected_text_effect_ids(settings):
     raw = settings.get("textEffectIds")
     if raw is None:
@@ -443,9 +467,9 @@ def choose_pip_sources(settings):
     folder = Path(require(settings.get("pipFolder"), "画中画文件夹"))
     if not folder.exists():
         raise SystemExit(f"画中画文件夹不存在：{folder}")
-    candidates = media_files(folder, VIDEO_EXTS)
+    candidates = media_files(folder, PIP_MEDIA_EXTS)
     if not candidates:
-        raise SystemExit(f"画中画文件夹里没有可用视频素材：{folder}")
+        raise SystemExit(f"画中画文件夹里没有可用素材：{folder}")
     return candidates
 
 
@@ -466,20 +490,34 @@ def pip_rule_items(settings):
         if not isinstance(rule, dict):
             continue
         keywords = split_keyword_terms(rule.get("keywords"))
+        use_video_file = bool_setting(rule.get("useVideoFile", True))
         video_value = str(rule.get("videoFile") or "").strip()
-        if not keywords and not video_value:
+        folder_value = str(rule.get("videoFolder") or rule.get("folder") or "").strip()
+        if not keywords and not video_value and not folder_value:
             continue
-        if not keywords or not video_value:
-            raise SystemExit(f"自定义画中画第 {index} 行需要同时填写关键词和视频文件")
-        source = Path(video_value)
-        if not source.exists():
-            raise SystemExit(f"自定义画中画第 {index} 行视频不存在：{source}")
-        if source.suffix.lower() not in VIDEO_EXTS:
-            raise SystemExit(f"自定义画中画第 {index} 行不是支持的视频格式：{source}")
+        if not keywords:
+            raise SystemExit(f"自定义画中画第 {index} 行需要填写关键词")
+        if use_video_file:
+            source = Path(require(video_value, f"自定义画中画第 {index} 行指定素材文件"))
+            if not source.exists():
+                raise SystemExit(f"自定义画中画第 {index} 行素材不存在：{source}")
+            if source.suffix.lower() not in PIP_MEDIA_EXTS:
+                raise SystemExit(f"自定义画中画第 {index} 行不是支持的素材格式：{source}")
+            sources = [source]
+            mode = "fixed"
+        else:
+            folder = Path(require(folder_value, f"自定义画中画第 {index} 行随机素材文件夹"))
+            if not folder.exists():
+                raise SystemExit(f"自定义画中画第 {index} 行素材文件夹不存在：{folder}")
+            sources = media_files(folder, PIP_MEDIA_EXTS)
+            if not sources:
+                raise SystemExit(f"自定义画中画第 {index} 行素材文件夹里没有可用素材：{folder}")
+            mode = "random"
         rules.append({
             "index": index,
             "keywords": keywords,
-            "source": source,
+            "sources": sources,
+            "source_mode": mode,
             "priority": rule.get("priority", None),
         })
     return rules
@@ -551,6 +589,24 @@ def choose_text_effect_sfx(settings):
     if not candidates:
         log_json("text_effect_sfx_empty", folder=str(folder))
         return None, "empty"
+    return random.choice(candidates), "random"
+
+
+def choose_logo_file(settings):
+    if bool_setting(settings.get("useLogoFile", True)):
+        path = Path(require(settings.get("logoFile"), "指定 Logo 图片"))
+        if not path.exists():
+            raise SystemExit(f"指定 Logo 图片不存在：{path}")
+        if path.suffix.lower() not in IMAGE_EXTS:
+            raise SystemExit(f"指定 Logo 图片不是支持的图片格式：{path}")
+        return path, "fixed"
+
+    folder = Path(require(settings.get("logoFolder"), "Logo 文件夹"))
+    if not folder.exists():
+        raise SystemExit(f"Logo 文件夹不存在：{folder}")
+    candidates = media_files(folder, IMAGE_EXTS)
+    if not candidates:
+        raise SystemExit(f"Logo 文件夹里没有可用图片：{folder}")
     return random.choice(candidates), "random"
 
 
@@ -677,7 +733,7 @@ def review_text_effect_specs(settings, item, pages):
             "优先选择真正重要、能单独成立的重点行，例如原因、关键、胰岛修复、胰岛素抵抗、血糖反复、不能乱停药等。",
             "优先选择 6-10 个中文字符的短行，最长不要超过 12 个中文字符；如果一整句被分成两行，只能选择其中一行。",
             "不要选择评论区、留下需要、后台来找我等 CTA 行。",
-            "如果某一页是两行，只选其中更重要的一行；另一行会继续按普通字幕同时显示，不要选择它。",
+            "如果某一页是两行，只选其中更重要的一行；系统会把被选中的这一行拆成单独字幕页，另一行会放到前后相邻的普通字幕页，不会同时显示。",
             "不要选择花字样式，系统会从用户勾选的花字样式里随机分配。",
         ],
         "available_effect_ids": effect_ids,
@@ -1349,6 +1405,97 @@ def overlay_text_effect_clips(base_path, clips, output_path):
     subprocess.run(cmd, check=True)
 
 
+def render_packaged_without_builtin_logo(raw_video, ass_path, packaged_path, pip_events=None):
+    pip_events = pip_events or []
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(raw_video),
+    ]
+
+    valid_pips = [event for event in pip_events if event and event.get("source")]
+    for event in valid_pips:
+        pip_source = Path(event["source"])
+        suffix = pip_source.suffix.lower()
+        if suffix in getattr(batch, "PIP_IMAGE_EXTS", IMAGE_EXTS):
+            cmd.extend(["-loop", "1", "-i", str(pip_source)])
+        else:
+            cmd.extend(["-an", "-i", str(pip_source)])
+
+    filter_parts = []
+    base_label = "0:v"
+    for input_index, event in enumerate(valid_pips, start=1):
+        event_i = input_index - 1
+        start = float(event["start"])
+        end = float(event["end"])
+        width = int(event.get("width", getattr(batch, "PIP_WIDTH", 768)))
+        height = int(event.get("height", getattr(batch, "PIP_HEIGHT", 432)))
+        x = int(event.get("x", getattr(batch, "PIP_X", 156)))
+        y = int(event.get("y", getattr(batch, "PIP_Y", 910)))
+        pip_label = f"pip{event_i}"
+        out_label = f"vbase{event_i + 1}"
+        filter_parts.append(
+            f"[{input_index}:v]setpts=PTS-STARTPTS+{start:.3f}/TB,"
+            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},setsar=1[{pip_label}]"
+        )
+        filter_parts.append(
+            f"[{base_label}][{pip_label}]overlay={x}:{y}:eof_action=pass:enable='between(t,{start:.3f},{end:.3f})'[{out_label}]"
+        )
+        base_label = out_label
+
+    ass_filter_path = batch.ffmpeg_filter_path(ass_path)
+    font_filter_path = batch.ffmpeg_filter_path(batch.FONT_DIR)
+    filter_parts.append(f"[{base_label}]ass=filename='{ass_filter_path}':fontsdir='{font_filter_path}'[v]")
+
+    cmd.extend([
+        "-filter_complex", ";".join(filter_parts),
+        "-map", "[v]",
+        "-map", "0:a?",
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", "18",
+        "-c:a", "aac",
+        "-b:a", "160k",
+        "-movflags", "+faststart",
+        str(packaged_path),
+    ])
+    subprocess.run(cmd, check=True)
+
+
+def overlay_logo_full_video(input_path, logo_file, settings, output_path):
+    logo_path = Path(logo_file)
+    if not logo_path.exists():
+        raise SystemExit(f"Logo 图片不存在：{logo_path}")
+    box = preview_layout_box(settings, "previewLogo", {"x": 90, "y": 88, "w": 180, "h": 180, "min_w": 48, "min_h": 48})
+    opacity = bounded_number(settings.get("logoOpacityPercent"), 100, 0, 100) / 100.0
+    x = box["x"]
+    y = box["y"]
+    w = box["w"]
+    h = box["h"]
+    filter_complex = (
+        f"[1:v]scale={w}:{h}:force_original_aspect_ratio=decrease,"
+        f"format=rgba,colorchannelmixer=aa={opacity:.3f}[logo];"
+        f"[0:v][logo]overlay=x='{x}+({w}-overlay_w)/2':y='{y}+({h}-overlay_h)/2':format=auto:eof_action=pass,"
+        "format=yuv420p[v]"
+    )
+    subprocess.run([
+        "ffmpeg", "-y",
+        "-i", str(input_path),
+        "-loop", "1",
+        "-i", str(logo_path),
+        "-filter_complex", filter_complex,
+        "-map", "[v]",
+        "-map", "0:a?",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-preset", "medium",
+        "-crf", "18",
+        "-c:a", "copy",
+        "-movflags", "+faststart",
+        str(output_path),
+    ], check=True)
+
+
 def build_fallback_pip_event(timed_units, duration, title_end, source):
     for group in batch.sentence_groups(timed_units):
         start = max(float(group["start"]), float(title_end or 0.0) + 0.2)
@@ -1467,7 +1614,8 @@ def build_rule_pip_events(settings, timed_units, duration, title_end, rules=None
     term_items = []
     for rule in (rules if rules is not None else pip_rule_items(settings)):
         for item in normalized_pip_term_items(rule["keywords"]):
-            item["source"] = rule["source"]
+            item["sources"] = rule["sources"]
+            item["source_mode"] = rule.get("source_mode", "fixed")
             item["rule_index"] = rule["index"]
             item["priority"] = rule.get("priority")
             term_items.append(item)
@@ -1477,7 +1625,7 @@ def build_rule_pip_events(settings, timed_units, duration, title_end, rules=None
         duration,
         title_end,
         term_items,
-        lambda item, _unit: item.get("source"),
+        lambda item, _unit: random.choice(item.get("sources") or []),
         "keyword_pip_rule",
     )
 
@@ -1661,6 +1809,9 @@ def apply_settings(settings, bundle):
     disclaimer_font = Path(settings.get("disclaimerFontPath") or caption_font)
     bgm_file = Path(require(settings.get("bgmFile"), "BGM 文件")) if clip_enabled(settings, "clipBgm", True) else None
     output_dir = Path(require(settings.get("outputDir"), "输出目录"))
+    output_subdir = safe_output_subdir(settings.get("outputSubdir"))
+    if output_subdir:
+        output_dir = output_dir / output_subdir
     if not title_font.exists():
         raise SystemExit(f"标题字体不存在：{title_font}")
     if not caption_font.exists():
@@ -1671,6 +1822,12 @@ def apply_settings(settings, bundle):
         raise SystemExit(f"底部声明字体不存在：{disclaimer_font}")
     if bgm_file and not bgm_file.exists():
         raise SystemExit(f"BGM 文件不存在：{bgm_file}")
+    if clip_enabled(settings, "clipLogo", False):
+        if not settings.get("logoFile"):
+            settings["logoFile"] = str(bundle / "assets" / "template_assets" / "medical_logo_ref_1080.png")
+        if not settings.get("logoFolder"):
+            settings["logoFolder"] = str(bundle / "assets" / "template_assets")
+        choose_logo_file(settings)
     if effect_enabled(settings, "clipPip"):
         if not pip_rule_items(settings):
             choose_pip_sources(settings)
@@ -1891,15 +2048,185 @@ def sanitize_caption_lines(lines):
     return [batch.display_line(line) for line in lines if batch.display_line(line)]
 
 
-def caption_display_events(pages, caption_units, title_end, duration):
+def caption_buffer_seconds(settings):
+    return bounded_number((settings or {}).get("captionBufferSeconds"), 0.12, 0.0, 0.5)
+
+
+def line_time_for_offset(spans, offset, prefer_start=False):
+    if not spans:
+        return 0.0
+    offset = max(0, int(offset))
+    first = spans[0]
+    if offset <= first["text_start"]:
+        return float(first["unit"].get("start", 0.0))
+    for index, span in enumerate(spans):
+        text_start = int(span["text_start"])
+        text_end = int(span["text_end"])
+        if prefer_start and offset == text_end and index + 1 < len(spans) and spans[index + 1]["text_start"] == offset:
+            return float(spans[index + 1]["unit"].get("start", span["unit"].get("end", 0.0)))
+        if offset <= text_start:
+            return float(span["unit"].get("start", 0.0))
+        if offset < text_end:
+            duration = float(span["unit"].get("end", span["unit"].get("start", 0.0))) - float(span["unit"].get("start", 0.0))
+            ratio = (offset - text_start) / max(1, text_end - text_start)
+            return float(span["unit"].get("start", 0.0)) + duration * ratio
+        if offset == text_end:
+            return float(span["unit"].get("end", span["unit"].get("start", 0.0)))
+    return float(spans[-1]["unit"].get("end", spans[-1]["unit"].get("start", 0.0)))
+
+
+def unit_index_for_offset(spans, offset, prefer_start=False):
+    if not spans:
+        return 0
+    offset = max(0, int(offset))
+    if offset <= spans[0]["text_start"]:
+        return int(spans[0]["index"])
+    for index, span in enumerate(spans):
+        text_start = int(span["text_start"])
+        text_end = int(span["text_end"])
+        if prefer_start and offset == text_end and index + 1 < len(spans) and spans[index + 1]["text_start"] == offset:
+            return int(spans[index + 1]["index"])
+        if text_start <= offset <= text_end:
+            return int(span["index"])
+    return int(spans[-1]["index"])
+
+
+def caption_line_segments(page, caption_units):
+    try:
+        start = int(page["start"])
+        end = int(page["end"])
+    except Exception:
+        return None
+    units = caption_units[start:end + 1]
+    if not units:
+        return None
+    spans = []
+    cursor = 0
+    for offset, unit in enumerate(units):
+        text = batch.display_line(unit.get("text", ""))
+        if not text:
+            continue
+        spans.append({
+            "index": start + offset,
+            "unit": unit,
+            "text_start": cursor,
+            "text_end": cursor + len(text),
+        })
+        cursor += len(text)
+    full_text = "".join(batch.display_line(unit.get("text", "")) for unit in units)
+    lines = sanitize_caption_lines(page.get("lines") or [])
+    if not full_text or "".join(lines) != full_text:
+        return None
+
+    line_segments = []
+    line_cursor = 0
+    for line_index, line in enumerate(lines):
+        text = batch.display_line(line)
+        if not text:
+            return None
+        expected_end = line_cursor + len(text)
+        if full_text[line_cursor:expected_end] != text:
+            found = full_text.find(text, line_cursor)
+            if found < 0:
+                return None
+            line_cursor = found
+            expected_end = line_cursor + len(text)
+        line_start = line_time_for_offset(spans, line_cursor, prefer_start=True)
+        line_end = line_time_for_offset(spans, expected_end, prefer_start=False)
+        start_index = unit_index_for_offset(spans, line_cursor, prefer_start=True)
+        end_index = unit_index_for_offset(spans, expected_end, prefer_start=False)
+        line_segments.append({
+            "line_index": line_index,
+            "text": text,
+            "start": start_index,
+            "end": end_index,
+            "time_start": round(line_start, 3),
+            "time_end": round(line_end, 3),
+        })
+        line_cursor = expected_end
+    return line_segments
+
+
+def isolate_text_effect_caption_pages(pages, caption_units, specs):
+    if not specs:
+        return pages, specs
+    selected = {}
+    for spec in specs:
+        try:
+            selected[(int(spec.get("page")), int(spec.get("line")))] = spec
+        except Exception:
+            continue
+    if not selected:
+        return pages, specs
+
+    new_pages = []
+    spec_mapping = {}
+    isolated_count = 0
+    failed_count = 0
+    for page_index, page in enumerate(pages or []):
+        lines = sanitize_caption_lines(page.get("lines") or [])
+        selected_lines = [line for source_page, line in selected if source_page == page_index]
+        if not selected_lines or len(lines) <= 1:
+            new_index = len(new_pages)
+            new_pages.append(page)
+            for line_index in selected_lines:
+                spec_mapping[(page_index, line_index)] = (new_index, line_index)
+            continue
+
+        line_segments = caption_line_segments(page, caption_units)
+        if not line_segments or len(line_segments) != len(lines):
+            failed_count += 1
+            new_index = len(new_pages)
+            new_pages.append(page)
+            for line_index in selected_lines:
+                spec_mapping[(page_index, line_index)] = (new_index, line_index)
+            continue
+
+        selected_line_set = set(selected_lines)
+        for segment in line_segments:
+            new_index = len(new_pages)
+            new_pages.append({
+                "start": segment["start"],
+                "end": segment["end"],
+                "lines": [segment["text"]],
+                "time_start": segment["time_start"],
+                "time_end": segment["time_end"],
+                "source_page": page_index,
+                "source_line": segment["line_index"],
+            })
+            if segment["line_index"] in selected_line_set:
+                spec_mapping[(page_index, segment["line_index"])] = (new_index, 0)
+                isolated_count += 1
+
+    new_specs = []
+    for spec in specs:
+        try:
+            key = (int(spec.get("page")), int(spec.get("line")))
+        except Exception:
+            continue
+        mapped = spec_mapping.get(key)
+        if not mapped:
+            continue
+        updated = dict(spec)
+        updated["page"], updated["line"] = mapped
+        new_specs.append(updated)
+    if isolated_count or failed_count:
+        log_json("text_effect_caption_pages_isolated", isolated=isolated_count, failed=failed_count)
+    return new_pages, new_specs
+
+
+def caption_display_events(pages, caption_units, title_end, duration, settings=None):
     title_clear_time = min(duration, title_end + 0.12)
+    transition_gap = caption_buffer_seconds(settings)
     events = []
     for page_index, page in enumerate(pages):
         group = caption_units[page["start"]:page["end"] + 1]
         if not group:
             continue
-        start = max(group[0]["start"], title_clear_time)
-        end = group[-1]["end"]
+        raw_start = page.get("time_start")
+        raw_end = page.get("time_end")
+        start = max(float(raw_start) if raw_start is not None else group[0]["start"], title_clear_time)
+        end = float(raw_end) if raw_end is not None else group[-1]["end"]
         if end <= title_clear_time:
             continue
         if end - start < 0.25:
@@ -1909,14 +2236,16 @@ def caption_display_events(pages, caption_units, title_end, duration):
             events.append({"start": start, "end": end, "lines": caption_lines, "page_index": page_index})
 
     for current, following in zip(events, events[1:]):
-        if current["end"] > following["start"] - 0.02:
-            current["end"] = max(current["start"] + 0.18, following["start"] - 0.02)
+        if current["end"] > following["start"] - transition_gap:
+            current["end"] = max(current["start"] + 0.18, following["start"] - transition_gap)
     return [event for event in events if event["end"] > event["start"]]
 
 
 def supervise_caption_breaks(settings, item):
     hook, units = batch.build_spoken_units(item["text"])
-    caption_units = [unit for unit in units if unit.get("source") != "title" and unit.get("visible")]
+    caption_units = subtitle_units(units, settings)
+    if not caption_units:
+        return []
     initial_pages = auto_caption_pages(caption_units)
     unit_payload = [
         {
@@ -1943,6 +2272,8 @@ def supervise_caption_breaks(settings, item):
         "caption_units": unit_payload,
         "current_pages": initial_pages,
     }
+    if hide_cta_captions(settings):
+        prompt["rules"][-1] = "CTA 已按剪辑配置隐藏，给定字幕单元里不包含 CTA；不要自行补回评论区、留下需要、后台来找我等 CTA 字幕。"
     messages = [
         {
             "role": "system",
@@ -2040,9 +2371,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         lines.append(batch.ass_dialogue(4, 0, title_end, "TitleYellow", f"{{\\pos({title_center_x},{title_line_y(title_box, 0.49)})\\fs{yellow_size}}}{batch.ass_escape(yellow)}"))
         lines.append(batch.ass_dialogue(4, 0, title_end, "TitleBlue", f"{{\\pos({title_center_x},{title_line_y(title_box, 0.82)})\\fs{blue_size}}}{batch.ass_escape(blue)}"))
 
-    caption_units = [unit for unit in timed_units if unit.get("source") != "title" and unit.get("visible")]
+    caption_units = subtitle_units(timed_units, settings)
     srt_blocks = []
-    caption_events = caption_display_events(pages, caption_units, title_end, duration) if show_caption else []
+    caption_events = caption_display_events(pages, caption_units, title_end, duration, settings) if show_caption else []
     srt_i = 1
     for event in caption_events:
         page_index = int(event.get("page_index", -1))
@@ -2183,6 +2514,372 @@ def raw_path_for_task(task_id, slug):
     return batch.GENERATED_DIR / f"{task_id}_{slug}_raw.mp4"
 
 
+def selected_chanjing_asset(settings, assets):
+    raw_index = settings.get("chanjingAssetIndex")
+    try:
+        index = int(raw_index or 0)
+    except (TypeError, ValueError):
+        index = 0
+    if index <= 0:
+        return None
+    if index > len(assets):
+        raise SystemExit(f"数字人资产{index}不存在，当前只有 {len(assets)} 个")
+    overrides = settings.get("chanjingAssetOverrides")
+    if isinstance(overrides, dict):
+        override = overrides.get(str(index)) or overrides.get(index)
+        if isinstance(override, dict) and override.get("enabled") is False:
+            raise SystemExit(f"数字人资产{index}已停用")
+    return dict(assets[index - 1])
+
+
+def normalize_asset_selection_mode(value):
+    text = str(value or "custom").strip().lower()
+    if text == "custom":
+        return "random_account"
+    if text == "rotate":
+        return "rotate_account"
+    if text == "random":
+        return "random_all"
+    return text if text in {"rotate_account", "random_account", "random_all"} else "random_account"
+
+
+def account_count_for_settings(settings):
+    accounts = settings.get("chanjingAccounts")
+    account_count = len(accounts) if isinstance(accounts, list) else 0
+    account_map = settings.get("accountTemplates")
+    if isinstance(account_map, dict):
+        for key in account_map:
+            try:
+                account_count = max(account_count, int(key))
+            except Exception:
+                continue
+    return max(1, account_count)
+
+
+def parse_account_index_list(value, fallback, max_count):
+    if isinstance(value, list):
+        raw_items = value
+    else:
+        raw_items = re.split(r"[,，\s]+", str(value or ""))
+    indexes = []
+    for item in raw_items:
+        try:
+            index = int(item)
+        except Exception:
+            continue
+        if 1 <= index <= max_count and index not in indexes:
+            indexes.append(index)
+    if indexes:
+        return indexes
+    try:
+        fallback_index = int(fallback or 1)
+    except Exception:
+        fallback_index = 1
+    return [min(max(1, fallback_index), max_count)]
+
+
+def asset_enabled(settings, index):
+    overrides = settings.get("chanjingAssetOverrides")
+    if not isinstance(overrides, dict):
+        return True
+    override = overrides.get(str(index)) or overrides.get(index)
+    return not (isinstance(override, dict) and override.get("enabled") is False)
+
+
+def enabled_asset_indexes(settings, assets):
+    return [
+        index
+        for index in range(1, len(assets) + 1)
+        if asset_enabled(settings, index)
+    ]
+
+
+def template_config(value):
+    if not isinstance(value, dict):
+        return {}
+    config = value.get("config")
+    if isinstance(config, dict):
+        return dict(config)
+    return {
+        key: item
+        for key, item in value.items()
+        if key not in {"id", "name", "assetIndex", "asset", "chanjingAssetIndex", "enabled"}
+    }
+
+
+def normalize_template_definition(value, account_index, position):
+    if not isinstance(value, dict):
+        return None
+    try:
+        asset_index = int(value.get("assetIndex") or value.get("chanjingAssetIndex") or value.get("asset") or 0)
+    except Exception:
+        asset_index = 0
+    if asset_index <= 0:
+        return None
+    template_id = str(value.get("id") or f"tpl_{account_index}_{position}_{asset_index}").strip()
+    if not template_id:
+        return None
+    return {
+        "id": template_id,
+        "name": str(value.get("name") or f"Template {position}").strip() or f"Template {position}",
+        "assetIndex": asset_index,
+        "enabled": value.get("enabled") is not False,
+        "config": template_config(value),
+    }
+
+
+def account_templates(settings, account_index, include_disabled=False):
+    raw = settings.get("accountTemplates")
+    templates = []
+    if isinstance(raw, dict):
+        rows = raw.get(str(account_index)) or raw.get(account_index) or []
+        if isinstance(rows, list):
+            for position, row in enumerate(rows, start=1):
+                template = normalize_template_definition(row, account_index, position)
+                if template and (include_disabled or template.get("enabled", True)):
+                    templates.append(template)
+    return templates
+
+
+def legacy_asset_templates(settings, account_index, assets):
+    templates = []
+    legacy = settings.get("accountAssetTemplates")
+    if not isinstance(legacy, dict):
+        legacy = {}
+    for asset_index in enabled_asset_indexes(settings, assets):
+        raw_config = legacy.get(f"{account_index}:{asset_index}")
+        config = dict(raw_config) if isinstance(raw_config, dict) else {}
+        templates.append({
+            "id": f"asset_{asset_index}",
+            "name": f"Asset {asset_index}",
+            "assetIndex": asset_index,
+            "enabled": True,
+            "config": config,
+        })
+    return templates
+
+
+def enabled_templates_for_account(settings, account_index, assets):
+    all_templates = account_templates(settings, account_index, include_disabled=True)
+    templates = [
+        template
+        for template in all_templates
+        if template.get("enabled", True)
+        if 1 <= int(template.get("assetIndex") or 0) <= len(assets)
+        and asset_enabled(settings, int(template.get("assetIndex") or 0))
+    ]
+    if all_templates:
+        return templates
+    account_template_map = settings.get("accountTemplates")
+    if isinstance(account_template_map, dict) and account_template_map:
+        return []
+    return legacy_asset_templates(settings, account_index, assets)
+
+
+def enabled_template_entries(settings, assets, account_indexes=None):
+    account_count = account_count_for_settings(settings)
+    if account_indexes:
+        indexes = [index for index in account_indexes if 1 <= int(index) <= account_count]
+    else:
+        indexes = list(range(1, account_count + 1))
+    entries = []
+    for account_index in indexes:
+        for template in enabled_templates_for_account(settings, account_index, assets):
+            item = dict(template)
+            item["_accountIndex"] = account_index
+            entries.append(item)
+    return entries
+
+
+def template_assignments(job):
+    raw = job.get("templateAssignments")
+    if not isinstance(raw, dict):
+        raw = job.get("assetAssignments")
+    if not isinstance(raw, dict):
+        return {}
+    assignments = {}
+    for key, value in raw.items():
+        try:
+            row_index = int(key)
+        except Exception:
+            continue
+        template_id = str(value or "").strip()
+        if row_index > 0 and template_id:
+            assignments[row_index] = template_id
+    return assignments
+
+
+def find_template(templates, template_id):
+    wanted = str(template_id or "").strip()
+    if not wanted:
+        return None
+    for template in templates:
+        if str(template.get("id") or "") == wanted:
+            return template
+    try:
+        legacy_asset_index = int(wanted)
+    except Exception:
+        legacy_asset_index = 0
+    if legacy_asset_index > 0:
+        for template in templates:
+            if int(template.get("assetIndex") or 0) == legacy_asset_index:
+                return template
+    return None
+
+
+def parse_template_assignment(value, fallback_account_index):
+    text = str(value or "").strip()
+    account_index = max(1, int(fallback_account_index or 1))
+    if ":" not in text:
+        return account_index, text
+    account_raw, template_id = text.split(":", 1)
+    try:
+        parsed_account = int(account_raw)
+    except Exception:
+        parsed_account = account_index
+    return max(1, parsed_account), template_id.strip()
+
+
+def template_for_item(settings, item, ordinal, assets, job):
+    account_index = account_index_for_job(settings)
+    row_index = int(item.get("index") or 0)
+    assigned = template_assignments(job).get(row_index)
+    if assigned:
+        account_index, assigned_id = parse_template_assignment(assigned, account_index)
+        templates = enabled_templates_for_account(settings, account_index, assets)
+        if not templates:
+            raise SystemExit(f"Row {row_index} selected account has no templates: {account_index}")
+        template = find_template(templates, assigned_id)
+        if not template:
+            raise SystemExit(f"Row {row_index} selected template is missing: {assigned}")
+        template = dict(template)
+        template["_accountIndex"] = account_index
+        return template
+
+    templates = enabled_templates_for_account(settings, account_index, assets)
+    if not templates:
+        raise SystemExit("No account templates")
+
+    mode = normalize_asset_selection_mode(settings.get("assetSelectionMode"))
+    if mode == "random_all":
+        entries = enabled_template_entries(settings, assets)
+        if not entries:
+            raise SystemExit("No account templates")
+        return dict(random.choice(entries))
+    if mode == "random_account":
+        account_indexes = parse_account_index_list(
+            settings.get("runRandomAccountIndexes"),
+            account_index,
+            account_count_for_settings(settings),
+        )
+        entries = enabled_template_entries(settings, assets, account_indexes)
+        if not entries:
+            raise SystemExit("No account templates")
+        return dict(random.choice(entries))
+    if mode == "rotate_account":
+        account_indexes = parse_account_index_list(
+            settings.get("runRotateAccountIndexes"),
+            settings.get("runRandomAccountIndexes") or account_index,
+            account_count_for_settings(settings),
+        )
+        entries = enabled_template_entries(settings, assets, account_indexes)
+        if not entries:
+            raise SystemExit("No account templates")
+        return dict(entries[(max(1, int(ordinal or 1)) - 1) % len(entries)])
+    if mode == "rotate":
+        template = dict(templates[(max(1, int(ordinal or 1)) - 1) % len(templates)])
+        template["_accountIndex"] = account_index
+        return template
+
+    current = find_template(templates, settings.get("currentTemplateId"))
+    template = dict(current or templates[0])
+    template["_accountIndex"] = account_index
+    return template
+
+
+def job_asset_assignments(job):
+    raw = job.get("assetAssignments")
+    if not isinstance(raw, dict):
+        return {}
+    assignments = {}
+    for key, value in raw.items():
+        try:
+            row_index = int(key)
+            asset_index = int(value)
+        except Exception:
+            continue
+        if row_index > 0 and asset_index > 0:
+            assignments[row_index] = asset_index
+    return assignments
+
+
+def asset_index_for_item(settings, item, ordinal, assets, job):
+    enabled = enabled_asset_indexes(settings, assets)
+    if not enabled:
+        raise SystemExit("没有启用的数字人资产")
+
+    assignments = job_asset_assignments(job)
+    row_index = int(item.get("index") or 0)
+    assigned = assignments.get(row_index)
+    if assigned:
+        if assigned not in enabled:
+            raise SystemExit(f"第 {row_index} 行选择的数字人资产{assigned}未启用或不存在")
+        return assigned
+
+    mode = normalize_asset_selection_mode(settings.get("assetSelectionMode"))
+    if mode in {"random_account", "rotate_account", "random_all"}:
+        return random.choice(enabled)
+    if mode == "rotate":
+        return enabled[(max(1, int(ordinal or 1)) - 1) % len(enabled)]
+
+    fallback = int(settings.get("chanjingAssetIndex") or enabled[0])
+    return fallback if fallback in enabled else enabled[0]
+
+
+def account_index_for_job(settings):
+    try:
+        index = int(settings.get("runChanjingAccountIndex") or settings.get("chanjingAccountIndex") or 1)
+    except Exception:
+        index = 1
+    return max(1, index)
+
+
+def account_asset_template(settings, account_index, asset_index):
+    templates = settings.get("accountAssetTemplates")
+    if not isinstance(templates, dict):
+        return {}
+    template = templates.get(f"{account_index}:{asset_index}")
+    return dict(template) if isinstance(template, dict) else {}
+
+
+def settings_for_item(settings, item, ordinal, assets, job):
+    template = template_for_item(settings, item, ordinal, assets, job)
+    account_index = int(template.get("_accountIndex") or account_index_for_job(settings))
+    asset_index = int(template.get("assetIndex") or 0)
+    template_settings = dict(template.get("config") or {})
+    merged = {
+        **settings,
+        **template_settings,
+        "runChanjingAccountIndex": account_index,
+        "chanjingAccountIndex": account_index,
+        "chanjingAssetIndex": asset_index,
+        "currentTemplateId": template.get("id", ""),
+        "activeTemplateId": template.get("id", ""),
+        "activeTemplateName": template.get("name", ""),
+        "activeTemplateAssetIndex": asset_index,
+        "activeTemplateKey": f"{account_index}:{template.get('id', '')}",
+    }
+    return merged
+
+
+def same_chanjing_asset(left, right):
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return False
+    left_key = (left.get("person_id"), left.get("file"))
+    right_key = (right.get("person_id"), right.get("file"))
+    return left_key == right_key
+
+
 def asset_with_allowed_voice(asset, assets):
     if asset.get("person_id") not in BAD_VOICE_PERSON_IDS:
         return asset
@@ -2208,7 +2905,7 @@ def asset_with_allowed_voice(asset, assets):
     return updated
 
 
-def recover_entry_from_previous_runs(slug, item, state_path):
+def recover_entry_from_previous_runs(slug, item, state_path, requested_asset=None):
     work_dir = state_path.parent
     if not work_dir.exists():
         return None
@@ -2228,6 +2925,8 @@ def recover_entry_from_previous_runs(slug, item, state_path):
             continue
         previous_hash = entry.get("text_hash")
         if previous_hash != item["text_hash"]:
+            continue
+        if requested_asset and not same_chanjing_asset(entry.get("asset"), requested_asset):
             continue
         task_id = str(entry["task_id"])
         raw_video = raw_path_for_task(task_id, slug)
@@ -2260,6 +2959,7 @@ def recover_entry_from_previous_runs(slug, item, state_path):
 def ensure_raw_video(item, index, assets, state_path, state, settings, force_fresh=False):
     slug = item["slug"]
     entry = state["items"].setdefault(slug, {})
+    requested_asset = selected_chanjing_asset(settings, assets)
     if force_fresh:
         entry = {}
         state["items"][slug] = entry
@@ -2271,7 +2971,17 @@ def ensure_raw_video(item, index, assets, state_path, state, settings, force_fre
         state["items"][slug] = entry
     entry["text_hash"] = item["text_hash"]
     task_id = entry.get("task_id")
-    asset = (None if force_fresh else entry.get("asset")) or assets[(index - 1) % len(assets)]
+    if requested_asset and task_id and not same_chanjing_asset(entry.get("asset"), requested_asset):
+        log_json(
+            "state_asset_changed",
+            slug=slug,
+            from_asset=(entry.get("asset") or {}).get("name", ""),
+            to_asset=requested_asset.get("name", ""),
+        )
+        entry = {"text_hash": item["text_hash"]}
+        state["items"][slug] = entry
+        task_id = None
+    asset = requested_asset or (None if force_fresh else entry.get("asset")) or assets[(index - 1) % len(assets)]
     if not task_id:
         asset = asset_with_allowed_voice(asset, assets)
     entry["asset"] = asset
@@ -2283,7 +2993,7 @@ def ensure_raw_video(item, index, assets, state_path, state, settings, force_fre
             return task_id, raw_video
 
     if not task_id and not force_fresh:
-        recovered = recover_entry_from_previous_runs(slug, item, state_path)
+        recovered = recover_entry_from_previous_runs(slug, item, state_path, requested_asset=requested_asset)
         if recovered:
             entry.update(recovered)
             task_id = entry.get("task_id")
@@ -2357,7 +3067,17 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
     if apply_item_content_override(item, index, load_content_overrides(job)):
         log_json("content_override_applied", index=index, slug=slug, chars=len(item["text"]))
     started_at = time.time()
-    log_json("item_start", index=index, slug=slug, topic=item.get("topic", ""), started_at=started_at)
+    log_json(
+        "item_start",
+        index=index,
+        slug=slug,
+        topic=item.get("topic", ""),
+        started_at=started_at,
+        template_key=settings.get("activeTemplateKey", ""),
+        template_id=settings.get("activeTemplateId", ""),
+        template_name=settings.get("activeTemplateName", ""),
+        chanjing_asset_index=settings.get("chanjingAssetIndex", ""),
+    )
     try:
         show_caption = clip_enabled(settings, "clipCaption", True)
         reviewed_pages = supervise_caption_breaks(settings, item) if show_caption else []
@@ -2382,6 +3102,7 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
         remotion_image_layer = output_dir / f"{prefix}_image_effects.mov"
         packaged = output_dir / f"{prefix}_packaged.mp4"
         packaged_with_images = output_dir / f"{prefix}_packaged_image_effects.mp4"
+        packaged_with_logo = output_dir / f"{prefix}_packaged_logo.mp4"
         final = output_dir / f"{prefix}_final.mp4"
         report = output_dir / f"{prefix}_report.txt"
         opening_replaced = output_dir / f"{prefix}_opening_replaced_tmp.mp4"
@@ -2393,19 +3114,29 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
         if apply_item_title_override(item, index, load_title_overrides(job)):
             log_json("title_override_applied", index=index, slug=slug, title=item["title"])
         title_end = batch.title_end_for_units(timed_units)
-        caption_units = [unit for unit in timed_units if unit.get("source") != "title" and unit.get("visible")]
-        caption_events = caption_display_events(reviewed_pages, caption_units, title_end, duration) if show_caption else []
+        caption_units = subtitle_units(timed_units, settings)
         text_effect_specs = review_text_effect_specs(settings, item, reviewed_pages)
+        render_pages, text_effect_specs = isolate_text_effect_caption_pages(reviewed_pages, caption_units, text_effect_specs)
+        caption_events = caption_display_events(render_pages, caption_units, title_end, duration, settings) if show_caption else []
         source_for_packaging = raw_video
         report_extra = {
             "clip_title": clip_enabled(settings, "clipTitle", True),
             "clip_caption": show_caption,
             "clip_bgm": clip_enabled(settings, "clipBgm", True),
+            "hide_cta_captions": hide_cta_captions(settings),
             "clip_title_motion": title_motion_enabled(settings),
             "clip_intro": effect_enabled(settings, "clipIntro"),
             "clip_patent": effect_enabled(settings, "clipPatent"),
             "clip_pip": effect_enabled(settings, "clipPip"),
             "clip_text_effects": effect_enabled(settings, "clipTextEffects"),
+            "clip_logo": clip_enabled(settings, "clipLogo", False),
+            "template_key": str(settings.get("activeTemplateKey", "")),
+            "template_id": str(settings.get("activeTemplateId", "")),
+            "template_name": str(settings.get("activeTemplateName", "")),
+            "template_asset_index": str(settings.get("activeTemplateAssetIndex", "")),
+            "chanjing_account_index": str(settings.get("chanjingAccountIndex", "")),
+            "chanjing_asset_index": str(settings.get("chanjingAssetIndex", "")),
+            "caption_buffer_seconds": f"{caption_buffer_seconds(settings):.3f}",
             "pip_duration_seconds": f"{pip_duration_seconds(settings):.3f}",
             "pip_close_at_sentence_end": pip_close_at_sentence_end(settings),
             "effect_priority_policy": "user_configured_0_to_10_lower_number_wins",
@@ -2424,7 +3155,7 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
                 effect_candidates.append(title_event)
         effect_candidates.extend(build_backing_image_effect_events(settings, timed_units, duration, title_end))
         effect_candidates.extend(build_pip_effect_events(settings, timed_units, duration, title_end))
-        effect_candidates.extend(build_text_effect_events(settings, reviewed_pages, caption_events, text_effect_specs))
+        effect_candidates.extend(build_text_effect_events(settings, render_pages, caption_events, text_effect_specs))
         selected_effects, skipped_effects = select_effect_events(effect_candidates)
         selected_effects, skipped_effects = enforce_single_pip_event(selected_effects, skipped_effects)
         selected_title_motion = any(event.get("effect_type") == "title_motion" for event in selected_effects)
@@ -2491,7 +3222,7 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             item,
             timed_units,
             hook,
-            reviewed_pages,
+            render_pages,
             duration,
             ass_path,
             srt_path,
@@ -2516,7 +3247,7 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
                 opening_video=str(opening_video),
                 replace_seconds=round(replaced_seconds, 3),
             )
-        batch.render_packaged(source_for_packaging, ass_path, packaged, pip_events=selected_pip_events)
+        render_packaged_without_builtin_logo(source_for_packaging, ass_path, packaged, pip_events=selected_pip_events)
         packaged_for_tighten = packaged
         if selected_image_events:
             write_remotion_image_plan(remotion_image_plan_path, selected_image_events, duration)
@@ -2548,6 +3279,23 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
                     clips=len(rendered_text_effects),
                     output=str(text_effect_packaged),
                 )
+        if clip_enabled(settings, "clipLogo", False):
+            logo_box = preview_layout_box(settings, "previewLogo", {"x": 90, "y": 88, "w": 180, "h": 180, "min_w": 48, "min_h": 48})
+            logo_file, logo_mode = choose_logo_file(settings)
+            overlay_logo_full_video(packaged_for_tighten, logo_file, settings, packaged_with_logo)
+            packaged_for_tighten = packaged_with_logo
+            report_extra.update({
+                "logo_mode": logo_mode,
+                "logo_file": str(logo_file),
+                "logo_box": json.dumps(logo_box, ensure_ascii=False),
+                "logo_opacity_percent": str(settings.get("logoOpacityPercent", 100)),
+            })
+            log_json(
+                "logo_applied",
+                index=index,
+                slug=slug,
+                output=str(packaged_with_logo),
+            )
         tighten_and_mix_selected_bgm(
             packaged_for_tighten,
             final,
@@ -2599,12 +3347,14 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
 
 
 def run_job(job):
-    settings = job["settings"]
+    settings = dict(job["settings"])
+    batch_output_name = safe_output_subdir(job.get("batchOutputName"))
+    if batch_output_name:
+        settings["outputSubdir"] = batch_output_name
     input_path = Path(require(job.get("inputJsonPath"), "任务 JSON"))
     if not input_path.exists():
         raise SystemExit(f"任务 JSON 不存在：{input_path}")
     bundle = import_batch(require(settings.get("bundlePath"), "素材包目录"))
-    runtime = apply_settings(settings, bundle)
 
     data = json.loads(input_path.read_text(encoding="utf-8"))
     items = normalize_items(data)
@@ -2631,6 +3381,8 @@ def run_job(job):
         "batch_name": batch_name,
         "input_json": str(input_path),
         "updated_at": int(time.time()),
+        "run_account_index": account_index_for_job(settings),
+        "asset_selection_mode": normalize_asset_selection_mode(settings.get("assetSelectionMode")),
     })
     save_state(state_path, state)
     random.seed()
@@ -2641,13 +3393,33 @@ def run_job(job):
         count=len(items),
         state=str(state_path),
         force_fresh_chanjing=bool(job.get("forceFreshChanjing", False)),
+        run_account_index=account_index_for_job(settings),
+        asset_selection_mode=normalize_asset_selection_mode(settings.get("assetSelectionMode")),
     )
     succeeded = 0
     failed = 0
     consecutive_errors = 0
-    for item in items:
+    last_runtime = None
+    for ordinal, item in enumerate(items, start=1):
+        setup_started_at = time.time()
         try:
-            process_item(item, item["index"], assets, state_path, state, settings, runtime, job)
+            try:
+                item_settings = settings_for_item(settings, item, ordinal, assets, job)
+                runtime = apply_settings(item_settings, bundle)
+                last_runtime = runtime
+            except BaseException as setup_exc:
+                failed_at = time.time()
+                log_json(
+                    "item_failed",
+                    index=item.get("index"),
+                    slug=item.get("slug", ""),
+                    error=str(setup_exc),
+                    started_at=setup_started_at,
+                    failed_at=failed_at,
+                    elapsed_seconds=round(failed_at - setup_started_at, 3),
+                )
+                raise
+            process_item(item, item["index"], assets, state_path, state, item_settings, runtime, job)
             succeeded += 1
             consecutive_errors = 0
         except BaseException as exc:
@@ -2666,7 +3438,8 @@ def run_job(job):
                 )
                 raise SystemExit(f"连续 {consecutive_errors} 条任务失败，已停止：{exc}")
             continue
-    log_json("job_done", count=len(items), succeeded=succeeded, failed=failed, output_dir=str(runtime["output_dir"]))
+    output_dir = last_runtime["output_dir"] if last_runtime else Path(settings.get("outputDir") or "")
+    log_json("job_done", count=len(items), succeeded=succeeded, failed=failed, output_dir=str(output_dir))
 
 
 def main():
