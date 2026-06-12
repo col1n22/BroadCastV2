@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, screen, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -385,11 +385,14 @@ async function importSettings() {
 }
 
 function createWindow() {
+  const { width: workWidth, height: workHeight } = screen.getPrimaryDisplay().workAreaSize;
+  const windowWidth = Math.min(1360, Math.max(960, workWidth - 64));
+  const windowHeight = Math.min(920, Math.max(640, workHeight - 64));
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 860,
-    minWidth: 1080,
-    minHeight: 720,
+    width: windowWidth,
+    height: windowHeight,
+    minWidth: 900,
+    minHeight: 620,
     backgroundColor: '#f4f5f7',
     title: '医生视频剪辑',
     webPreferences: {
