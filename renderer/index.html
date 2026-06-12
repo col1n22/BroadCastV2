@@ -61,9 +61,13 @@
                   </label>
                   <div id="runRotateAccountList" class="template-account-checks"></div>
                   <label>
-                    <input name="templateSelectionMode" type="radio" value="random_all" />
-                    <span>所有账号所有模板全部随机</span>
+                    <input name="templateSelectionMode" type="radio" value="fixed_template" />
+                    <span>指定账号指定模板</span>
                   </label>
+                  <div id="runFixedTemplatePicker" class="template-fixed-picker" hidden>
+                    <select id="runFixedAccountIndex"></select>
+                    <select id="runFixedTemplateId"></select>
+                  </div>
                 </div>
               </div>
               <button id="btnRun" class="button primary">开始出片</button>
@@ -75,8 +79,8 @@
             <div class="field">
               <label>文案文件</label>
               <div class="path-row json-file-row">
-                <button id="btnLoadJson" class="button secondary" type="button">选择生成文案</button>
-                <button id="btnCustomText" class="button secondary" type="button">自定义文案</button>
+                <button id="btnLoadJson" class="button secondary" type="button" hidden>选择生成文案</button>
+                <button id="btnCustomText" class="button secondary" type="button">导入文案</button>
                 <span id="selectedJsonName" class="selected-json-name" title="">未选择文案</span>
               </div>
             </div>
@@ -172,7 +176,7 @@
 
           <div id="previewMissingState" class="preview-missing-state" hidden>
             <div class="preview-missing-content">
-              <div>请添加模板</div>
+              <div id="previewMissingText">请添加模板</div>
               <button id="btnOpenTemplateFromEmpty" class="button primary" type="button">新建模板</button>
             </div>
           </div>
@@ -530,44 +534,39 @@
           <div class="toolbar">
             <div>
               <h2>风格</h2>
-              <p class="muted">统一管理标题、字幕、声明的字体样式，以及视频里的 BGM 和后续音效文件。</p>
+              <p class="muted">统一管理 BGM、音效、视频素材和特效规则；字体、颜色、描边在模板管理里按账号模板单独保存。</p>
             </div>
             <button id="btnSaveStyleSettings" class="button primary">保存风格</button>
           </div>
 
-          <div class="settings-grid">
-            <div class="settings-card style-source-card">
-              <h3>字体</h3>
-              <div class="field">
-                <label>标题字体文件</label>
-                <div class="path-row">
-                  <input id="titleFontPath" />
-                  <button class="icon-button" data-pick-font="titleFontPath" title="选择字体">...</button>
-                </div>
-              </div>
-              <div class="field">
-                <label>字幕字体文件</label>
-                <div class="path-row">
-                  <input id="captionFontPath" />
-                  <button class="icon-button" data-pick-font="captionFontPath" title="选择字体">...</button>
-                </div>
-              </div>
-              <div class="field">
-                <label>花字字体文件</label>
-                <div class="path-row">
-                  <input id="textEffectFontPath" />
-                  <button class="icon-button" data-pick-font="textEffectFontPath" title="选择字体">...</button>
-                </div>
-              </div>
-              <div class="field">
-                <label>底部声明字体文件</label>
-                <div class="path-row">
-                  <input id="disclaimerFontPath" />
-                  <button class="icon-button" data-pick-font="disclaimerFontPath" title="选择字体">...</button>
-                </div>
-              </div>
-            </div>
+          <div class="hidden-template-style-fields" hidden>
+            <input id="titleFontPath" />
+            <input id="captionFontPath" />
+            <input id="textEffectFontPath" />
+            <input id="disclaimerFontPath" />
+            <input id="titleTopColor" type="color" />
+            <input id="titleTopOutlineColor" type="color" />
+            <input id="titleTopOutlineSize" type="number" />
+            <input id="titleMiddleColor" type="color" />
+            <input id="titleMiddleOutlineColor" type="color" />
+            <input id="titleMiddleOutlineSize" type="number" />
+            <input id="titleBottomColor" type="color" />
+            <input id="titleBottomOutlineColor" type="color" />
+            <input id="titleBottomOutlineSize" type="number" />
+            <input id="captionColor" type="color" />
+            <input id="captionOutlineColor" type="color" />
+            <input id="captionOutlineSize" type="number" />
+            <input id="disclaimerColor" type="color" />
+            <input id="disclaimerOutlineColor" type="color" />
+            <input id="disclaimerOutlineSize" type="number" />
+            <input id="disclaimerOpacityPercent" type="number" />
+            <input id="logoFolder" />
+            <input id="logoFile" />
+            <input id="useLogoFile" type="checkbox" />
+            <input id="logoOpacityPercent" type="number" />
+          </div>
 
+          <div class="settings-grid style-settings-grid">
             <div class="settings-card">
               <h3>音效</h3>
               <div class="field">
@@ -659,30 +658,6 @@
             </div>
 
             <div class="settings-card">
-              <h3>Logo</h3>
-              <div class="field">
-                <label>Logo 文件夹</label>
-                <div class="path-row">
-                  <input id="logoFolder" />
-                  <button class="icon-button" data-pick-dir="logoFolder" title="选择目录">...</button>
-                </div>
-              </div>
-              <div class="field">
-                <label>指定 Logo 图片</label>
-                <div class="path-row with-toggle">
-                  <input id="logoFile" />
-                  <button class="icon-button" data-pick-image="logoFile" title="选择图片">...</button>
-                  <label class="inline-check"><input id="useLogoFile" type="checkbox" /><span>使用指定</span></label>
-                </div>
-              </div>
-              <div class="field">
-                <label>Logo 不透明度（%）</label>
-                <input id="logoOpacityPercent" type="number" min="0" max="100" step="1" />
-              </div>
-              <p class="hint">勾选剪辑配置里的 Logo 后，使用指定图片；取消“使用指定”则从 Logo 文件夹随机选一张。</p>
-            </div>
-
-            <div class="settings-card">
               <h3>画中画</h3>
               <div class="field">
                 <label>素材文件夹</label>
@@ -750,47 +725,12 @@
               <p class="hint">前端先保存触发关键词；后端接入后会用命中的分行后字幕单行做花字。</p>
             </div>
 
-            <div class="settings-card style-source-card">
-              <h3>文字样式</h3>
-              <div class="style-grid">
-                <span class="style-head">对象</span>
-                <span class="style-head">字体颜色</span>
-                <span class="style-head">描边颜色</span>
-                <span class="style-head">描边大小</span>
-
-                <label>标题上</label>
-                <input id="titleTopColor" type="color" />
-                <input id="titleTopOutlineColor" type="color" />
-                <input id="titleTopOutlineSize" type="number" min="0" max="80" />
-
-                <label>标题中</label>
-                <input id="titleMiddleColor" type="color" />
-                <input id="titleMiddleOutlineColor" type="color" />
-                <input id="titleMiddleOutlineSize" type="number" min="0" max="80" />
-
-                <label>标题下</label>
-                <input id="titleBottomColor" type="color" />
-                <input id="titleBottomOutlineColor" type="color" />
-                <input id="titleBottomOutlineSize" type="number" min="0" max="80" />
-
-                <label>字幕</label>
-                <input id="captionColor" type="color" />
-                <input id="captionOutlineColor" type="color" />
-                <input id="captionOutlineSize" type="number" min="0" max="80" />
-
-                <label>底部声明</label>
-                <input id="disclaimerColor" type="color" />
-                <input id="disclaimerOutlineColor" type="color" />
-                <input id="disclaimerOutlineSize" type="number" min="0" max="80" />
-              </div>
+            <div class="settings-card">
+              <h3>字幕规则</h3>
               <div class="field">
                 <label>字幕缓冲时间（秒）</label>
                 <input id="captionBufferSeconds" type="number" min="0" max="0.5" step="0.01" />
                 <p class="hint">上一段字幕会提前结束这段时间，默认 0.12 秒。</p>
-              </div>
-              <div class="field">
-                <label>底部声明不透明度（%）</label>
-                <input id="disclaimerOpacityPercent" type="number" min="0" max="100" />
               </div>
             </div>
           </div>
@@ -920,6 +860,10 @@
                 <button id="btnAssetManagerCancelAccount" class="button secondary small" type="button">取消</button>
               </div>
             </div>
+          </div>
+          <div class="field">
+            <label>模板名称</label>
+            <input id="assetManagerTemplateName" placeholder="模板名称" />
           </div>
           <div class="template-add-actions">
             <button id="btnCancelAssetManagerAdd" class="button secondary" type="button">取消</button>

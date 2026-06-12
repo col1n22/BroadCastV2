@@ -305,15 +305,39 @@ textarea {
   background: #f8f9fb;
 }
 
+.template-account-checks[hidden] {
+  display: none;
+}
+
 .template-account-checks label {
   min-height: 28px;
   font-size: 12px;
+}
+
+.template-account-checks .template-account-all {
+  grid-column: 1 / -1;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
 }
 
 .template-account-checks input[type="checkbox"] {
   width: 16px;
   height: 16px;
   min-height: 16px;
+}
+
+.template-fixed-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8f9fb;
+}
+
+.template-fixed-picker[hidden] {
+  display: none;
 }
 
 .template-mode-menu select {
@@ -936,6 +960,17 @@ th {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   align-items: start;
+}
+
+.style-settings-grid {
+  display: block;
+  column-count: 2;
+  column-gap: 16px;
+}
+
+.style-settings-grid > .settings-card {
+  break-inside: avoid;
+  margin: 0 0 16px;
 }
 
 .settings-card {
@@ -1700,5 +1735,9 @@ th {
   .template-account-picker,
   .summary-strip {
     grid-template-columns: 1fr;
+  }
+
+  .style-settings-grid {
+    column-count: 1;
   }
 }

@@ -22,6 +22,20 @@
       "python/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "vendor",
+        "to": "vendor"
+      },
+      {
+        "from": "resources_bundle",
+        "to": "resources_bundle"
+      },
+      {
+        "from": "defaults",
+        "to": "defaults"
+      }
+    ],
     "directories": {
       "output": "dist"
     },

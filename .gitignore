@@ -1,5 +1,8 @@
 node_modules/
 dist/
+vendor/
+resources_bundle/
+defaults/
 
 __pycache__/
 *.py[cod]

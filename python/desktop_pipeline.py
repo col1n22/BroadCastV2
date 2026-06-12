@@ -20,6 +20,32 @@ import urllib.parse
 from pathlib import Path
 
 
+def configure_ssl_certificates():
+    if os.environ.get("SSL_CERT_FILE"):
+        return
+    candidates = []
+    try:
+        import certifi
+        candidates.append(certifi.where())
+    except Exception:
+        pass
+    script_root = Path(__file__).resolve().parents[1]
+    candidates.extend([
+        script_root / "vendor" / "python" / "Lib" / "site-packages" / "certifi" / "cacert.pem",
+        script_root / "vendor" / "python" / "Lib" / "site-packages" / "pip" / "_vendor" / "certifi" / "cacert.pem",
+    ])
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            ca_file = str(candidate)
+            os.environ.setdefault("SSL_CERT_FILE", ca_file)
+            os.environ.setdefault("REQUESTS_CA_BUNDLE", ca_file)
+            os.environ.setdefault("CURL_CA_BUNDLE", ca_file)
+            break
+
+
+configure_ssl_certificates()
+
+
 batch = None
 
 BAD_VOICE_PERSON_IDS = {
@@ -569,6 +595,47 @@ def self_intro_text_matches(text):
     return any(term in clean for term in ("大家好", "我是", "胡天宝", "北京", "中医", "名老", "特聘", "医生", "专攻", "糖尿病"))
 
 
+GENERIC_IDENTITY_PIP_TERMS = {
+    "大家好",
+    "我是",
+    "胡天宝",
+    "北京",
+    "中医",
+    "名老",
+    "特聘",
+    "医生",
+    "专攻",
+    "糖尿病",
+}
+
+
+def is_generic_identity_pip_term(term):
+    clean = normalized_keyword_text(term)
+    return any(clean == normalized_keyword_text(item) for item in GENERIC_IDENTITY_PIP_TERMS)
+
+
+def sentence_has_backing_keyword(text):
+    return any(backing_kind_matches(text, kind) for kind in ("xinhuo", "patent"))
+
+
+def sentence_ends_with_period(text):
+    return str(text or "").strip().endswith(("。", "."))
+
+
+def is_backing_exclusive_sentence(text):
+    return sentence_has_backing_keyword(text) and sentence_ends_with_period(text)
+
+
+def backing_exclusive_sentence_indices_for_text(text):
+    split_sentences = getattr(batch, "split_sentences", None)
+    sentences = split_sentences(text) if callable(split_sentences) else re.findall(r"[^。！？!?]+[。！？!?]?", str(text or ""))
+    return {
+        index
+        for index, sentence in enumerate(sentences or [])
+        if is_backing_exclusive_sentence(sentence)
+    }
+
+
 def choose_text_effect_sfx(settings):
     if bool_setting(settings.get("useSfxFile")):
         path = Path(require(settings.get("sfxFile"), "指定音效文件"))
@@ -730,7 +797,7 @@ def review_text_effect_specs(settings, item, pages):
             "返回格式：{\"effects\":[{\"page\":数字,\"line\":数字}]}。",
             f"最多选择 {MAX_TEXT_EFFECT_EVENTS} 行；同一页最多选择一行。",
             "花字对象必须是 pages[page].lines[line] 里的完整一行，不允许自己改写、截取、合并多行或按原文整句重选。",
-            "优先选择真正重要、能单独成立的重点行，例如原因、关键、胰岛修复、胰岛素抵抗、血糖反复、不能乱停药等。",
+            "优先选择真正重要、能单独成立的重点行，例如原因、关键、胰岛修复、胰岛素抵抗、皿糖反复、不能乱停药等。",
             "优先选择 6-10 个中文字符的短行，最长不要超过 12 个中文字符；如果一整句被分成两行，只能选择其中一行。",
             "不要选择评论区、留下需要、后台来找我等 CTA 行。",
             "如果某一页是两行，只选其中更重要的一行；系统会把被选中的这一行拆成单独字幕页，另一行会放到前后相邻的普通字幕页，不会同时显示。",
@@ -801,16 +868,19 @@ def caption_effect_layout(settings, text):
     }
 
 
-def build_text_effect_events(settings, pages, caption_events, specs):
+def build_text_effect_events(settings, pages, caption_events, specs, blocked_sentence_indices=None):
     if not effect_enabled(settings, "clipTextEffects"):
         return []
     events_by_page = caption_event_by_page(caption_events)
+    blocked_sentence_indices = set(blocked_sentence_indices or [])
     events = []
     for spec in specs or []:
         page_index = spec.get("page")
         line_index = spec.get("line")
         caption_event = events_by_page.get(page_index)
         if not caption_event:
+            continue
+        if set(caption_event.get("sentence_indices") or []) & blocked_sentence_indices:
             continue
         lines = list(caption_event.get("lines") or [])
         if line_index is None or line_index < 0 or line_index >= len(lines):
@@ -1531,6 +1601,13 @@ def sentence_end_by_index(timed_units):
     return ends
 
 
+def sentence_text_by_index(timed_units):
+    return {
+        group["sentence_index"]: group.get("text", "")
+        for group in batch.sentence_groups(timed_units)
+    }
+
+
 def pip_event_end(settings, start, sentence_end, video_duration):
     start = float(start)
     sentence_end = float(sentence_end or start)
@@ -1559,19 +1636,27 @@ def normalized_pip_term_items(terms):
     return [{"term": term, "clean": clean} for term, clean in terms]
 
 
-def build_pip_event_from_terms(settings, timed_units, duration, title_end, term_items, source_picker, kind):
+def build_pip_event_from_terms(settings, timed_units, duration, title_end, term_items, source_picker, kind, blocked_sentence_indices=None):
     if not term_items:
         return []
     layout = pip_layout(settings)
     sentence_ends = sentence_end_by_index(timed_units)
+    sentence_texts = sentence_text_by_index(timed_units)
+    blocked_sentence_indices = set(blocked_sentence_indices or [])
     for unit in timed_units:
         if unit.get("source") == "title" or not unit.get("visible"):
             continue
+        sentence_index = unit.get("sentence_index")
+        if sentence_index in blocked_sentence_indices:
+            continue
+        sentence_text = sentence_texts.get(sentence_index, unit.get("text", ""))
         unit_start = float(unit.get("start", 0.0))
         unit_end = float(unit.get("end", unit_start))
         if unit_end <= float(title_end or 0.0) + 0.02:
             continue
         for item in term_items:
+            if sentence_has_backing_keyword(sentence_text) and is_generic_identity_pip_term(item["term"]):
+                continue
             start = keyword_start_in_unit(unit, item["clean"])
             if start is None:
                 continue
@@ -1579,9 +1664,9 @@ def build_pip_event_from_terms(settings, timed_units, duration, title_end, term_
             if not source:
                 continue
             start = max(float(title_end or 0.0) + 0.05, start)
-            sentence_end = sentence_ends.get(unit.get("sentence_index"), unit_end)
+            sentence_end = sentence_ends.get(sentence_index, unit_end)
             end = pip_event_end(settings, start, sentence_end, duration)
-            pip = batch.make_pip_event(source, start, end, duration, kind, unit.get("sentence_index"), title_end)
+            pip = batch.make_pip_event(source, start, end, duration, kind, sentence_index, title_end)
             if not pip:
                 return []
             pip.update(layout)
@@ -1595,7 +1680,7 @@ def build_pip_event_from_terms(settings, timed_units, duration, title_end, term_
     return []
 
 
-def build_keyword_pip_events(settings, timed_units, duration, title_end, sources):
+def build_keyword_pip_events(settings, timed_units, duration, title_end, sources, blocked_sentence_indices=None):
     if not sources:
         return []
     term_items = normalized_pip_term_items(pip_terms(settings))
@@ -1607,10 +1692,11 @@ def build_keyword_pip_events(settings, timed_units, duration, title_end, sources
         term_items,
         lambda _item, _unit: random.choice(sources),
         "keyword_pip",
+        blocked_sentence_indices=blocked_sentence_indices,
     )
 
 
-def build_rule_pip_events(settings, timed_units, duration, title_end, rules=None):
+def build_rule_pip_events(settings, timed_units, duration, title_end, rules=None, blocked_sentence_indices=None):
     term_items = []
     for rule in (rules if rules is not None else pip_rule_items(settings)):
         for item in normalized_pip_term_items(rule["keywords"]):
@@ -1627,18 +1713,22 @@ def build_rule_pip_events(settings, timed_units, duration, title_end, rules=None
         term_items,
         lambda item, _unit: random.choice(item.get("sources") or []),
         "keyword_pip_rule",
+        blocked_sentence_indices=blocked_sentence_indices,
     )
 
 
-def build_self_intro_pip_effect_events(settings, timed_units, duration, title_end):
+def build_self_intro_pip_effect_events(settings, timed_units, duration, title_end, blocked_sentence_indices=None):
     if not effect_enabled(settings, "clipIntro"):
         return []
+    blocked_sentence_indices = set(blocked_sentence_indices or [])
     sources = choose_self_intro_sources(settings)
     if not sources:
         log_json("self_intro_pip_missing_sources")
         return []
     layout = pip_layout(settings)
     for group in batch.sentence_groups(timed_units):
+        if group.get("sentence_index") in blocked_sentence_indices:
+            continue
         if float(group.get("end", 0.0)) <= float(title_end or 0.0) + 0.02:
             continue
         if not self_intro_text_matches(group.get("text", "")):
@@ -1665,15 +1755,15 @@ def build_self_intro_pip_effect_events(settings, timed_units, duration, title_en
     return []
 
 
-def build_pip_effect_events(settings, timed_units, duration, title_end):
+def build_pip_effect_events(settings, timed_units, duration, title_end, blocked_sentence_indices=None):
     if not effect_enabled(settings, "clipPip"):
         return []
     rules = pip_rule_items(settings)
     if rules:
-        raw_pips = build_rule_pip_events(settings, timed_units, duration, title_end, rules)
+        raw_pips = build_rule_pip_events(settings, timed_units, duration, title_end, rules, blocked_sentence_indices=blocked_sentence_indices)
     else:
         sources = choose_pip_sources(settings)
-        raw_pips = build_keyword_pip_events(settings, timed_units, duration, title_end, sources)
+        raw_pips = build_keyword_pip_events(settings, timed_units, duration, title_end, sources, blocked_sentence_indices=blocked_sentence_indices)
 
     events = []
     for raw_event in raw_pips:
@@ -1738,22 +1828,79 @@ def build_backing_image_effect_events(settings, timed_units, duration, title_end
             )
             if event:
                 events.append(event)
+                return events
     return events
 
 
-def write_remotion_image_plan(path, image_events, duration):
+def remotion_image_event_window(image_events, duration, padding=0.12):
+    if not image_events:
+        return 0.0, 0.0
+    start = max(0.0, min(float(event.get("start", 0.0)) for event in image_events) - float(padding))
+    end = min(float(duration), max(float(event.get("end", 0.0)) for event in image_events) + float(padding))
+    if end <= start:
+        end = min(float(duration), start + 0.5)
+    return start, end
+
+
+def shift_remotion_image_events(image_events, offset_seconds):
+    shifted = []
+    for event in image_events or []:
+        item = dict(event)
+        item["originalStart"] = item.get("start")
+        item["originalEnd"] = item.get("end")
+        item["originalStartFrame"] = item.get("startFrame")
+        item["originalEndFrame"] = item.get("endFrame")
+        local_start = max(0.0, float(item.get("start", 0.0)) - float(offset_seconds))
+        local_end = max(local_start + 0.04, float(item.get("end", item.get("start", 0.0))) - float(offset_seconds))
+        item["start"] = round(local_start, 3)
+        item["end"] = round(local_end, 3)
+        item["startFrame"] = max(0, int(round(local_start * 25)))
+        item["endFrame"] = max(item["startFrame"] + 1, int(round(local_end * 25)))
+        shifted.append(item)
+    return shifted
+
+
+def write_remotion_image_plan(path, image_events, duration, offset_seconds=0.0, source_duration=None):
+    plan_duration = float(source_duration) if source_duration is not None else float(duration)
     payload = {
         "composition": "CaptionEffects",
         "width": 1080,
         "height": 1920,
         "fps": 25,
-        "durationInFrames": int(round(float(duration) * 25)),
+        "durationInFrames": max(1, int(round(plan_duration * 25))),
         "events": [],
         "imageEvents": image_events or [],
+        "timelineOffsetSeconds": round(float(offset_seconds or 0.0), 3),
+        "sourceDuration": round(float(duration), 3),
         "remotionDir": str(batch.REMOTION_EFFECTS_DIR),
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
+
+
+def overlay_remotion_effects_at_offset(base_path, effect_layer_path, output_path, offset_seconds, overlay_duration):
+    offset_seconds = max(0.0, float(offset_seconds or 0.0))
+    overlay_end = offset_seconds + max(0.0, float(overlay_duration or 0.0))
+    filter_complex = (
+        f"[1:v]setpts=PTS+{offset_seconds:.3f}/TB[layer];"
+        f"[0:v][layer]overlay=0:0:format=auto:eof_action=pass:"
+        f"enable='between(t,{offset_seconds:.3f},{overlay_end:.3f})'[v]"
+    )
+    subprocess.run([
+        "ffmpeg", "-y",
+        "-i", str(base_path),
+        "-an",
+        "-i", str(effect_layer_path),
+        "-filter_complex", filter_complex,
+        "-map", "[v]",
+        "-map", "0:a?",
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", "18",
+        "-c:a", "copy",
+        "-movflags", "+faststart",
+        str(output_path),
+    ], check=True)
 
 
 def replace_opening_visual(input_path, opening_video, output_path, replace_seconds):
@@ -2147,6 +2294,35 @@ def caption_line_segments(page, caption_units):
     return line_segments
 
 
+def page_sentence_indices(page, caption_units):
+    try:
+        start = int(page["start"])
+        end = int(page["end"])
+    except Exception:
+        return set()
+    return {
+        unit.get("sentence_index")
+        for unit in caption_units[start:end + 1]
+        if unit.get("sentence_index") is not None
+    }
+
+
+def filter_text_effect_specs_by_blocked_sentences(specs, pages, caption_units, blocked_sentence_indices):
+    blocked_sentence_indices = set(blocked_sentence_indices or [])
+    if not specs or not blocked_sentence_indices:
+        return specs or []
+    filtered = []
+    for spec in specs:
+        try:
+            page = pages[int(spec.get("page"))]
+        except Exception:
+            continue
+        if page_sentence_indices(page, caption_units) & blocked_sentence_indices:
+            continue
+        filtered.append(spec)
+    return filtered
+
+
 def isolate_text_effect_caption_pages(pages, caption_units, specs):
     if not specs:
         return pages, specs
@@ -2233,7 +2409,21 @@ def caption_display_events(pages, caption_units, title_end, duration, settings=N
             end = min(duration, start + 0.35)
         caption_lines = sanitize_caption_lines(page["lines"])
         if caption_lines and end > start:
-            events.append({"start": start, "end": end, "lines": caption_lines, "page_index": page_index})
+            sentence_indices = sorted(
+                {
+                    unit.get("sentence_index")
+                    for unit in group
+                    if unit.get("sentence_index") is not None
+                },
+                key=lambda value: str(value),
+            )
+            events.append({
+                "start": start,
+                "end": end,
+                "lines": caption_lines,
+                "page_index": page_index,
+                "sentence_indices": sentence_indices,
+            })
 
     for current, following in zip(events, events[1:]):
         if current["end"] > following["start"] - transition_gap:
@@ -2263,10 +2453,10 @@ def supervise_caption_breaks(settings, item):
             "start/end 必须引用给定字幕单元 index，按顺序完整覆盖所有单元，不能重叠、不能跳过。",
             "每页最多两行；你要先像人一样读一遍，再判断断行是否顺口，不能只按固定分词。",
             "每一行必须能在 1080x1920 竖屏中用 96 号字幕字完整显示，宁可拆成两行或拆成相邻两页，也不要输出超宽长行。",
-            "单行尽量 7-10 个中文字符，最长不要超过 12 个中文字符；遇到大家好我是北京特聘基层、专攻二型糖尿疒调理方向、可只要它和血糖反复一起出现这类长行必须拆开。",
+            "单行尽量 7-10 个中文字符，最长不要超过 12 个中文字符；遇到大家好我是北京特聘基层、专攻二型糖尿疒调理方向、可只要它和皿糖反复一起出现这类长行必须拆开。",
             "不能出现饭后高背/后、胰岛修/复、一吃/饭、糖尿/疒、二型糖尿/疒这类读起来别扭或把词拆碎的断法。",
             "不能改字、不能漏字、不能添加标点；每一行字幕结尾都不要带逗号、句号、问号、感叹号、顿号、分号、冒号等标点；可以把连续单元合成一页。",
-            "显示替换已经执行：医显示为醫，药显示为藥，病显示为疒。",
+            "显示替换已经执行：医显示为醫，药显示为藥，病显示为疒，血显示为皿。",
             "CTA 也要显示字幕。",
         ],
         "caption_units": unit_payload,
@@ -2540,7 +2730,7 @@ def normalize_asset_selection_mode(value):
         return "rotate_account"
     if text == "random":
         return "random_all"
-    return text if text in {"rotate_account", "random_account", "random_all"} else "random_account"
+    return text if text in {"rotate_account", "random_account", "random_all", "fixed_template"} else "random_account"
 
 
 def account_count_for_settings(settings):
@@ -2786,6 +2976,20 @@ def template_for_item(settings, item, ordinal, assets, job):
         if not entries:
             raise SystemExit("No account templates")
         return dict(entries[(max(1, int(ordinal or 1)) - 1) % len(entries)])
+    if mode == "fixed_template":
+        try:
+            fixed_account_index = int(settings.get("runFixedAccountIndex") or account_index)
+        except Exception:
+            fixed_account_index = account_index
+        templates = enabled_templates_for_account(settings, fixed_account_index, assets)
+        if not templates:
+            raise SystemExit(f"Selected account has no templates: {fixed_account_index}")
+        template = find_template(templates, settings.get("runFixedTemplateId") or settings.get("currentTemplateId"))
+        if not template:
+            raise SystemExit(f"Selected template is missing: {settings.get('runFixedTemplateId') or settings.get('currentTemplateId')}")
+        template = dict(template)
+        template["_accountIndex"] = fixed_account_index
+        return template
     if mode == "rotate":
         template = dict(templates[(max(1, int(ordinal or 1)) - 1) % len(templates)])
         template["_accountIndex"] = account_index
@@ -3115,7 +3319,14 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             log_json("title_override_applied", index=index, slug=slug, title=item["title"])
         title_end = batch.title_end_for_units(timed_units)
         caption_units = subtitle_units(timed_units, settings)
+        backing_exclusive_sentence_indices = backing_exclusive_sentence_indices_for_text(item.get("text", ""))
         text_effect_specs = review_text_effect_specs(settings, item, reviewed_pages)
+        text_effect_specs = filter_text_effect_specs_by_blocked_sentences(
+            text_effect_specs,
+            reviewed_pages,
+            caption_units,
+            backing_exclusive_sentence_indices,
+        )
         render_pages, text_effect_specs = isolate_text_effect_caption_pages(reviewed_pages, caption_units, text_effect_specs)
         caption_events = caption_display_events(render_pages, caption_units, title_end, duration, settings) if show_caption else []
         source_for_packaging = raw_video
@@ -3146,6 +3357,8 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             "priority_patent": setting_priority(settings, "patentPriority"),
             "priority_pip": setting_priority(settings, "pipPriority"),
             "priority_text_effect": setting_priority(settings, "textEffectPriority"),
+            "backing_exclusive_sentence_indices": ",".join(str(value) for value in sorted(backing_exclusive_sentence_indices)),
+            "backing_exclusive_sentence_policy": "only_backing_effects_when_xinhuo_or_patent_sentence_ends_with_period",
         }
 
         effect_candidates = []
@@ -3154,8 +3367,8 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             if title_event:
                 effect_candidates.append(title_event)
         effect_candidates.extend(build_backing_image_effect_events(settings, timed_units, duration, title_end))
-        effect_candidates.extend(build_pip_effect_events(settings, timed_units, duration, title_end))
-        effect_candidates.extend(build_text_effect_events(settings, render_pages, caption_events, text_effect_specs))
+        effect_candidates.extend(build_pip_effect_events(settings, timed_units, duration, title_end, backing_exclusive_sentence_indices))
+        effect_candidates.extend(build_text_effect_events(settings, render_pages, caption_events, text_effect_specs, backing_exclusive_sentence_indices))
         selected_effects, skipped_effects = select_effect_events(effect_candidates)
         selected_effects, skipped_effects = enforce_single_pip_event(selected_effects, skipped_effects)
         selected_title_motion = any(event.get("effect_type") == "title_motion" for event in selected_effects)
@@ -3169,6 +3382,14 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             for event in selected_effects
             if event.get("image_event")
         ]
+        image_effect_offset = 0.0
+        image_effect_duration = 0.0
+        shifted_image_events = []
+        if selected_image_events:
+            image_effect_start, image_effect_end = remotion_image_event_window(selected_image_events, duration)
+            image_effect_offset = image_effect_start
+            image_effect_duration = max(0.0, image_effect_end - image_effect_start)
+            shifted_image_events = shift_remotion_image_events(selected_image_events, image_effect_offset)
         selected_text_effect_events = [
             event
             for event in selected_effects
@@ -3194,6 +3415,10 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             "effect_skipped": format_effect_ranges(skipped_effects),
             "image_effect_plan": str(remotion_image_plan_path),
             "image_effect_selected_count": len(selected_image_events),
+            "image_effect_short_render": bool(selected_image_events),
+            "image_effect_offset_seconds": f"{image_effect_offset:.3f}",
+            "image_effect_duration_seconds": f"{image_effect_duration:.3f}",
+            "image_effect_render_frames": int(round(image_effect_duration * 25)) if selected_image_events else 0,
             "text_effect_plan": str(text_effect_plan_path),
             "text_effect_selected_count": len(selected_text_effect_events),
             "text_effect_hidden_caption_lines": ",".join(f"{page}:{line}" for page, line in sorted(hidden_caption_lines)),
@@ -3250,15 +3475,29 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
         render_packaged_without_builtin_logo(source_for_packaging, ass_path, packaged, pip_events=selected_pip_events)
         packaged_for_tighten = packaged
         if selected_image_events:
-            write_remotion_image_plan(remotion_image_plan_path, selected_image_events, duration)
+            write_remotion_image_plan(
+                remotion_image_plan_path,
+                shifted_image_events,
+                duration,
+                offset_seconds=image_effect_offset,
+                source_duration=image_effect_duration,
+            )
             batch.render_remotion_effects(remotion_image_plan_path, remotion_image_layer)
-            batch.overlay_remotion_effects(packaged_for_tighten, remotion_image_layer, packaged_with_images)
+            overlay_remotion_effects_at_offset(
+                packaged_for_tighten,
+                remotion_image_layer,
+                packaged_with_images,
+                image_effect_offset,
+                image_effect_duration,
+            )
             packaged_for_tighten = packaged_with_images
             log_json(
                 "image_effect_applied",
                 index=index,
                 slug=slug,
                 effects=len(selected_image_events),
+                offset=round(image_effect_offset, 3),
+                duration=round(image_effect_duration, 3),
                 output=str(packaged_with_images),
             )
         if selected_text_effect_events:
@@ -3330,15 +3569,19 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
         if isinstance(exc, KeyboardInterrupt):
             raise
         failed_at = time.time()
+        traceback_text = traceback.format_exc()
+        error_text = str(exc)
+        if traceback_text and traceback_text.strip() and traceback_text.strip() != "NoneType: None":
+            error_text = f"{error_text}\n{traceback_text}"
         entry = state["items"].setdefault(slug, {})
         entry["failed_at"] = int(failed_at)
-        entry["error"] = str(exc)
+        entry["error"] = error_text
         save_state(state_path, state)
         log_json(
             "item_failed",
             index=index,
             slug=slug,
-            error=str(exc),
+            error=error_text,
             started_at=started_at,
             failed_at=failed_at,
             elapsed_seconds=round(failed_at - started_at, 3),
@@ -3409,11 +3652,15 @@ def run_job(job):
                 last_runtime = runtime
             except BaseException as setup_exc:
                 failed_at = time.time()
+                traceback_text = traceback.format_exc()
+                error_text = str(setup_exc)
+                if traceback_text and traceback_text.strip() and traceback_text.strip() != "NoneType: None":
+                    error_text = f"{error_text}\n{traceback_text}"
                 log_json(
                     "item_failed",
                     index=item.get("index"),
                     slug=item.get("slug", ""),
-                    error=str(setup_exc),
+                    error=error_text,
                     started_at=setup_started_at,
                     failed_at=failed_at,
                     elapsed_seconds=round(failed_at - setup_started_at, 3),

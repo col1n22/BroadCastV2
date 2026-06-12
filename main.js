@@ -14,14 +14,76 @@ function desktopPath(...parts) {
   return path.join(app.getPath('desktop'), ...parts);
 }
 
-function defaultLogoFile(bundlePath = desktopPath('hu_teacher_resource_bundle_20260602')) {
+function appResourcePath(...parts) {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, ...parts)
+    : path.join(__dirname, ...parts);
+}
+
+function firstExistingPath(...paths) {
+  return paths.find((candidate) => candidate && fs.existsSync(candidate)) || paths.find(Boolean) || '';
+}
+
+function bundledBundlePath() {
+  return firstExistingPath(
+    appResourcePath('resources_bundle', 'hu_teacher_resource_bundle_20260602'),
+    desktopPath('hu_teacher_resource_bundle_20260602')
+  );
+}
+
+function bundledPythonPath() {
+  return firstExistingPath(
+    appResourcePath('vendor', 'python', 'python.exe'),
+    'python'
+  );
+}
+
+function bundledCaCertPath() {
+  return firstExistingPath(
+    appResourcePath('vendor', 'python', 'Lib', 'site-packages', 'certifi', 'cacert.pem'),
+    appResourcePath('vendor', 'python', 'Lib', 'site-packages', 'pip', '_vendor', 'certifi', 'cacert.pem'),
+    ''
+  );
+}
+
+function bundledFfmpegBinDir() {
+  return firstExistingPath(
+    appResourcePath('vendor', 'ffmpeg', 'bin'),
+    ''
+  );
+}
+
+function bundledNodeDir() {
+  return firstExistingPath(
+    appResourcePath('vendor', 'nodejs'),
+    ''
+  );
+}
+
+function bundledChromeExecutable() {
+  return firstExistingPath(
+    appResourcePath('vendor', 'chrome', 'Application', 'chrome.exe'),
+    appResourcePath('vendor', 'chrome', 'chrome.exe'),
+    ''
+  );
+}
+
+function bundledFontPath(bundlePath, fileName) {
+  return path.join(bundlePath, 'assets', 'template_assets', 'fonts', fileName);
+}
+
+function bundledUserAssetPath(...parts) {
+  return appResourcePath('resources_bundle', 'user_assets', ...parts);
+}
+
+function defaultLogoFile(bundlePath = bundledBundlePath()) {
   return path.join(bundlePath, 'assets', 'template_assets', 'medical_logo_ref_1080.png');
 }
 
 function defaultSettings() {
-  const bundlePath = desktopPath('hu_teacher_resource_bundle_20260602');
+  const bundlePath = bundledBundlePath();
   return {
-    pythonPath: 'python',
+    pythonPath: bundledPythonPath(),
     bundlePath,
     outputDir: desktopPath('6.5'),
     chanjingBaseUrl: 'https://www.chanjing.cc/api',
@@ -46,10 +108,10 @@ function defaultSettings() {
     modelBaseUrl: '',
     modelApiKey: '',
     modelName: '',
-    titleFontPath: desktopPath('字体2', '尔雅新大黑（3500字试用版）.ttf'),
-    captionFontPath: desktopPath('字体2', '优设书华体.ttf'),
-    textEffectFontPath: desktopPath('字体2', '优设书华体.ttf'),
-    disclaimerFontPath: desktopPath('字体2', '优设书华体.ttf'),
+    titleFontPath: bundledFontPath(bundlePath, '尔雅新大黑（3500字试用版）.ttf'),
+    captionFontPath: bundledFontPath(bundlePath, '优设书华体.ttf'),
+    textEffectFontPath: bundledFontPath(bundlePath, '优设书华体.ttf'),
+    disclaimerFontPath: bundledFontPath(bundlePath, '优设书华体.ttf'),
     bgmFile: path.join(bundlePath, 'assets', 'BGM', 'bgm2.mp3'),
     bgmVolumePercent: 22,
     clipPreset: 'title_bgm',
@@ -143,36 +205,124 @@ function settingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
 }
 
-function loadSettings() {
+function bundledDefaultSettingsPath() {
+  return appResourcePath('defaults', 'settings.json');
+}
+
+function loadBundledDefaultSettings() {
   try {
-    if (fs.existsSync(settingsPath())) {
-      const saved = JSON.parse(fs.readFileSync(settingsPath(), 'utf8'));
-      const merged = { ...defaultSettings(), ...saved };
-      if (saved.useSfxFile === undefined && saved.sfxMode === 'fixed') {
-        merged.useSfxFile = true;
-      }
-      if (saved.clipTitleMotion === undefined && saved.clipPreset === 'title_motion_bgm_effects') {
-        merged.clipTitleMotion = true;
-      }
-      if (!merged.logoFile) {
-        merged.logoFile = defaultLogoFile(merged.bundlePath);
-      }
-      merged.clipTitle = true;
-      merged.clipCaption = true;
-      merged.clipBgm = true;
-      return merged;
+    const filePath = bundledDefaultSettingsPath();
+    if (fs.existsSync(filePath)) {
+      const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      return payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? (payload.settings && typeof payload.settings === 'object' ? payload.settings : payload)
+        : {};
     }
   } catch (error) {
     console.error(error);
   }
-  return defaultSettings();
+  return {};
+}
+
+function looksLikeAbsoluteWindowsPath(value) {
+  return /^[A-Za-z]:[\\/]/.test(String(value || ''));
+}
+
+function pathAfterBundleName(value) {
+  const normalized = String(value || '').replace(/\//g, '\\');
+  const marker = '\\hu_teacher_resource_bundle_20260602\\';
+  const index = normalized.toLowerCase().indexOf(marker.toLowerCase());
+  if (index < 0) return '';
+  return normalized.slice(index + marker.length);
+}
+
+function remapPackagedPath(value, bundlePath = bundledBundlePath()) {
+  if (!looksLikeAbsoluteWindowsPath(value)) return value;
+  if (fs.existsSync(value)) return value;
+
+  const suffix = pathAfterBundleName(value);
+  if (suffix) {
+    const candidate = path.join(bundlePath, ...suffix.split(/[\\/]+/).filter(Boolean));
+    if (fs.existsSync(candidate)) return candidate;
+  }
+
+  const baseName = path.basename(value);
+  const candidates = [
+    path.join(bundlePath, 'assets', 'template_assets', 'fonts', baseName),
+    path.join(bundlePath, 'assets', 'font', baseName),
+    path.join(bundlePath, 'assets', 'template_assets', baseName),
+    path.join(bundlePath, 'assets', 'BGM', baseName),
+    path.join(bundlePath, 'assets', 'keyword_sfx', baseName),
+    bundledUserAssetPath(baseName),
+    bundledUserAssetPath('audio', baseName),
+    bundledUserAssetPath('video', baseName),
+    bundledUserAssetPath('image', baseName),
+    bundledUserAssetPath('font', baseName)
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || value;
+}
+
+function remapSettingsPaths(value, bundlePath = bundledBundlePath()) {
+  if (Array.isArray(value)) {
+    return value.map((item) => remapSettingsPaths(item, bundlePath));
+  }
+  if (value && typeof value === 'object') {
+    const next = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (key === 'bundlePath') {
+        next[key] = fs.existsSync(entry) ? entry : bundlePath;
+      } else if (key === 'pythonPath') {
+        next[key] = fs.existsSync(entry) ? entry : bundledPythonPath();
+      } else if (key === 'outputDir') {
+        next[key] = entry && fs.existsSync(entry) ? entry : desktopPath('6.5');
+      } else {
+        next[key] = remapSettingsPaths(entry, bundlePath);
+      }
+    }
+    return next;
+  }
+  if (typeof value === 'string') {
+    return remapPackagedPath(value, bundlePath);
+  }
+  return value;
+}
+
+function normalizeLoadedSettings(saved) {
+  const merged = { ...defaultSettings(), ...(saved || {}) };
+  const remapped = remapSettingsPaths(merged, bundledBundlePath());
+  if (saved?.useSfxFile === undefined && saved?.sfxMode === 'fixed') {
+    remapped.useSfxFile = true;
+  }
+  if (saved?.clipTitleMotion === undefined && saved?.clipPreset === 'title_motion_bgm_effects') {
+    remapped.clipTitleMotion = true;
+  }
+  if (!remapped.logoFile) {
+    remapped.logoFile = defaultLogoFile(remapped.bundlePath);
+  }
+  remapped.clipTitle = true;
+  remapped.clipCaption = true;
+  remapped.clipBgm = true;
+  return remapped;
+}
+
+function loadSettings() {
+  try {
+    if (fs.existsSync(settingsPath())) {
+      const saved = JSON.parse(fs.readFileSync(settingsPath(), 'utf8'));
+      return normalizeLoadedSettings(saved);
+    }
+  } catch (error) {
+    console.error(error);
+  }
+  return normalizeLoadedSettings(loadBundledDefaultSettings());
 }
 
 function saveSettings(settings) {
+  const normalized = remapSettingsPaths(settings || {}, bundledBundlePath());
   fs.mkdirSync(path.dirname(settingsPath()), { recursive: true });
   fs.writeFileSync(settingsPath(), JSON.stringify({
     ...defaultSettings(),
-    ...settings,
+    ...normalized,
     clipTitle: true,
     clipCaption: true,
     clipBgm: true
@@ -707,6 +857,44 @@ ipcMain.handle('path:open', async (_event, targetPath) => {
   return true;
 });
 
+function runtimePythonPath(settings = {}) {
+  const configured = settings.pythonPath;
+  if (configured && fs.existsSync(configured)) return configured;
+  return bundledPythonPath();
+}
+
+function runtimeEnvironment() {
+  const extraPath = [];
+  const python = bundledPythonPath();
+  if (python && fs.existsSync(python)) {
+    extraPath.push(path.dirname(python), path.join(path.dirname(python), 'Scripts'));
+  }
+  const ffmpegBin = bundledFfmpegBinDir();
+  if (ffmpegBin && fs.existsSync(ffmpegBin)) {
+    extraPath.push(ffmpegBin);
+  }
+  const nodeDir = bundledNodeDir();
+  if (nodeDir && fs.existsSync(nodeDir)) {
+    extraPath.push(nodeDir);
+  }
+  const chrome = bundledChromeExecutable();
+  const caCert = bundledCaCertPath();
+  const env = {
+    ...process.env,
+    PATH: [...extraPath, process.env.PATH || ''].filter(Boolean).join(path.delimiter),
+    PYTHONIOENCODING: 'utf-8',
+    CHROME_EXECUTABLE: chrome || process.env.CHROME_EXECUTABLE || '',
+    CHROME_PATH: chrome || process.env.CHROME_PATH || ''
+  };
+  if (caCert && fs.existsSync(caCert)) {
+    env.SSL_CERT_FILE = caCert;
+    env.REQUESTS_CA_BUNDLE = caCert;
+    env.CURL_CA_BUNDLE = caCert;
+    env.NODE_EXTRA_CA_CERTS = caCert;
+  }
+  return env;
+}
+
 ipcMain.handle('run:start', async (_event, payload) => {
   if (activeRun) {
     throw new Error('已有任务正在运行');
@@ -720,15 +908,22 @@ ipcMain.handle('run:start', async (_event, payload) => {
   const contentOverridesPath = path.join(jobsDir, `job_${jobId}_contents.json`);
   fs.writeFileSync(titleOverridesPath, JSON.stringify(payload?.titleOverrides || {}, null, 2), 'utf8');
   fs.writeFileSync(contentOverridesPath, JSON.stringify(payload?.contentOverrides || {}, null, 2), 'utf8');
-  const jobPayload = { ...payload, titleOverridesPath, contentOverridesPath, forceFreshChanjing: false };
+  const runtimeSettings = normalizeLoadedSettings(payload?.settings || {});
+  const jobPayload = {
+    ...payload,
+    settings: runtimeSettings,
+    titleOverridesPath,
+    contentOverridesPath,
+    forceFreshChanjing: false
+  };
   fs.writeFileSync(jobPath, JSON.stringify(jobPayload, null, 2), 'utf8');
 
   const scriptPath = path.join(__dirname, 'python', 'desktop_pipeline.py');
-  const pythonPath = payload?.settings?.pythonPath || 'python';
+  const pythonPath = runtimePythonPath(runtimeSettings);
   const child = spawn(pythonPath, ['-u', scriptPath, '--job', jobPath], {
     cwd: __dirname,
     windowsHide: true,
-    env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+    env: runtimeEnvironment()
   });
   activeRun = child;
   activeTitleOverridesPath = titleOverridesPath;
