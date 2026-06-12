@@ -765,7 +765,11 @@ COPIES = [
 
 
 def run(cmd, **kwargs):
-    return subprocess.run(cmd, check=True, text=True, capture_output=True, **kwargs)
+    kwargs.setdefault("text", True)
+    kwargs.setdefault("encoding", "utf-8")
+    kwargs.setdefault("errors", "replace")
+    kwargs.setdefault("capture_output", True)
+    return subprocess.run(cmd, check=True, **kwargs)
 
 
 def load_env():
@@ -2588,7 +2592,7 @@ def render_remotion_effects(effects_path, effect_layer_path):
         _cli_path(render_output),
     ]
     try:
-        subprocess.run(cmd, cwd=runtime_dir, check=True, text=True, capture_output=True, errors="replace")
+        subprocess.run(cmd, cwd=runtime_dir, check=True, text=True, encoding="utf-8", capture_output=True, errors="replace")
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(remotion_error_message(exc, cmd, runtime_dir)) from exc
 
@@ -2621,7 +2625,7 @@ def detect_silences(path):
         "-i", str(path),
         "-af", f"silencedetect=noise={NOISE}:d={MIN_SILENCE}",
         "-f", "null", "-",
-    ], text=True, capture_output=True, check=True)
+    ], text=True, encoding="utf-8", errors="replace", capture_output=True, check=True)
     starts = []
     pairs = []
     for line in (proc.stderr or "").splitlines():

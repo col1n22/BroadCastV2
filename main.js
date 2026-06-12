@@ -883,6 +883,7 @@ function runtimeEnvironment() {
     ...process.env,
     PATH: [...extraPath, process.env.PATH || ''].filter(Boolean).join(path.delimiter),
     PYTHONIOENCODING: 'utf-8',
+    PYTHONUTF8: '1',
     CHROME_EXECUTABLE: chrome || process.env.CHROME_EXECUTABLE || '',
     CHROME_PATH: chrome || process.env.CHROME_PATH || ''
   };
