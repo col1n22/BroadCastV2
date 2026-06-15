@@ -24,6 +24,7 @@ const fields = [
   'textEffectFontPath',
   'disclaimerFontPath',
   'bgmFile',
+  'bgmLibrary',
   'bgmVolumePercent',
   'clipPreset',
   'clipTitle',
@@ -40,15 +41,20 @@ const fields = [
   'sfxMode',
   'sfxFolder',
   'sfxFile',
+  'sfxLibrary',
   'sfxVolumePercent',
   'useSfxFile',
   'keywordSfxEnabled',
   'keywordSfxKeywords',
   'openingVideoFolder',
   'openingVideoFile',
+  'openingVideoLibrary',
   'useOpeningVideoFile',
   'titleMotionPriority',
   'pipFolder',
+  'pipMaterialLibrary',
+  'pipMaterialFile',
+  'usePipMaterialFile',
   'pipKeywords',
   'pipRules',
   'pipPriority',
@@ -1039,6 +1045,12 @@ function fileBaseName(filePath) {
   return base.replace(/\.(ttf|otf|ttc)$/i, '') || base;
 }
 
+function mediaFileBaseName(filePath) {
+  const raw = String(filePath || '').trim();
+  const base = raw.split(/[\\/]/).filter(Boolean).pop() || raw;
+  return base.replace(/\.[^.\\/]+$/i, '') || base;
+}
+
 function normalizeFontLibrary(value) {
   const raw = Array.isArray(value) ? value : [];
   const seen = new Set();
@@ -1053,6 +1065,201 @@ function normalizeFontLibrary(value) {
     fonts.push({ name, path: fontPath });
   });
   return fonts;
+}
+
+const mediaLibraryConfigs = {
+  bgm: {
+    settingKey: 'bgmLibrary',
+    listId: 'bgmLibraryList',
+    countId: 'bgmLibraryCount',
+    importButtonId: 'btnImportBgmLibrary',
+    selectId: 'bgmLibrarySelect',
+    fileFieldId: 'bgmFile',
+    label: 'BGM',
+    emptyText: '还没有导入 BGM',
+    randomText: '从 BGM 库随机',
+    filterName: 'Audio',
+    extensions: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg']
+  },
+  sfx: {
+    settingKey: 'sfxLibrary',
+    listId: 'sfxLibraryList',
+    countId: 'sfxLibraryCount',
+    importButtonId: 'btnImportSfxLibrary',
+    selectId: 'sfxLibrarySelect',
+    fileFieldId: 'sfxFile',
+    label: '音效',
+    emptyText: '还没有导入音效',
+    filterName: 'Audio',
+    extensions: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg']
+  },
+  openingVideo: {
+    settingKey: 'openingVideoLibrary',
+    listId: 'openingVideoLibraryList',
+    countId: 'openingVideoLibraryCount',
+    importButtonId: 'btnImportOpeningVideoLibrary',
+    selectId: 'openingVideoLibrarySelect',
+    fileFieldId: 'openingVideoFile',
+    label: '开头视频',
+    emptyText: '还没有导入开头视频',
+    filterName: 'Video',
+    extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']
+  },
+  pipMaterial: {
+    settingKey: 'pipMaterialLibrary',
+    listId: 'pipMaterialLibraryList',
+    countId: 'pipMaterialLibraryCount',
+    importButtonId: 'btnImportPipMaterialLibrary',
+    selectId: 'pipMaterialLibrarySelect',
+    fileFieldId: 'pipMaterialFile',
+    label: '画中画素材',
+    emptyText: '还没有导入画中画素材',
+    filterName: 'Media',
+    extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'png', 'jpg', 'jpeg', 'webp']
+  }
+};
+
+function normalizeMediaLibrary(value, extensions) {
+  let raw = Array.isArray(value) ? value : [];
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      raw = JSON.parse(value);
+    } catch {
+      raw = [value];
+    }
+  }
+  const allowed = new Set(extensions.map((ext) => ext.toLowerCase()));
+  const seen = new Set();
+  const items = [];
+  raw.forEach((item) => {
+    const mediaPath = String(typeof item === 'string' ? item : item?.path || '').trim();
+    if (!mediaPath) return;
+    const ext = (mediaPath.split('.').pop() || '').toLowerCase();
+    if (!allowed.has(ext)) return;
+    const key = mediaPath.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    const name = String(typeof item === 'string' ? '' : item?.name || '').trim() || mediaFileBaseName(mediaPath);
+    items.push({ name, path: mediaPath });
+  });
+  return items;
+}
+
+function normalizeMediaLibraryForKind(kind, value = settings[mediaLibraryConfigs[kind]?.settingKey]) {
+  const config = mediaLibraryConfigs[kind];
+  return config ? normalizeMediaLibrary(value, config.extensions) : [];
+}
+
+function mediaLibraryWithCurrentPath(kind, currentPath) {
+  const config = mediaLibraryConfigs[kind];
+  if (!config) return [];
+  const items = normalizeMediaLibraryForKind(kind);
+  const pathText = String(currentPath || '').trim();
+  if (pathText && !items.some((item) => item.path.toLowerCase() === pathText.toLowerCase())) {
+    items.push({ name: `${mediaFileBaseName(pathText)}（当前文件）`, path: pathText });
+  }
+  return items;
+}
+
+function collectMediaLibraryFromUi(kind) {
+  const config = mediaLibraryConfigs[kind];
+  const list = config ? $(config.listId) : null;
+  if (!config || !list) return normalizeMediaLibraryForKind(kind);
+  const rows = Array.from(list.querySelectorAll('[data-media-library-path]'));
+  return normalizeMediaLibrary(rows.map((row) => ({
+    name: row.querySelector('[data-media-library-name]')?.value || row.dataset.mediaLibraryName || '',
+    path: row.dataset.mediaLibraryPath || ''
+  })), config.extensions);
+}
+
+function renderMediaLibrarySelect(kind) {
+  const config = mediaLibraryConfigs[kind];
+  const select = config ? $(config.selectId) : null;
+  if (!config || !select) return;
+  const fileInput = $(config.fileFieldId);
+  const currentPath = String(fileInput?.value || settings[config.fileFieldId] || '').trim();
+  const items = mediaLibraryWithCurrentPath(kind, currentPath);
+  select.innerHTML = '';
+  if (kind === 'bgm' && normalizeMediaLibraryForKind(kind).length) {
+    const randomOption = document.createElement('option');
+    randomOption.value = '';
+    randomOption.textContent = config.randomText;
+    select.appendChild(randomOption);
+  }
+  if (!items.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = `请先导入${config.label}`;
+    select.appendChild(option);
+    select.value = '';
+    select.disabled = true;
+    return;
+  }
+  if (kind !== 'bgm') {
+    const emptyOption = document.createElement('option');
+    emptyOption.value = '';
+    emptyOption.textContent = `请选择库内${config.label}`;
+    select.appendChild(emptyOption);
+  }
+  items.forEach((item) => {
+    const option = document.createElement('option');
+    option.value = item.path;
+    option.textContent = item.name;
+    option.title = item.path;
+    select.appendChild(option);
+  });
+  select.disabled = false;
+  select.value = items.some((item) => item.path === currentPath) ? currentPath : '';
+}
+
+function renderMediaLibrary(kind) {
+  const config = mediaLibraryConfigs[kind];
+  const list = config ? $(config.listId) : null;
+  const count = config ? $(config.countId) : null;
+  if (!config || !list) return;
+  const items = normalizeMediaLibraryForKind(kind);
+  if (count) count.textContent = `${items.length} 个${config.label}`;
+  list.innerHTML = '';
+  if (!items.length) {
+    list.innerHTML = `<div class="font-library-empty">${escapeHtml(config.emptyText)}</div>`;
+    renderMediaLibrarySelect(kind);
+    return;
+  }
+  items.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'font-library-row media-library-row';
+    row.dataset.mediaLibraryKind = kind;
+    row.dataset.mediaLibraryPath = item.path;
+    row.dataset.mediaLibraryName = item.name;
+    row.innerHTML = `
+      <input data-media-library-name value="${escapeHtml(item.name)}" />
+      <span title="${escapeHtml(item.path)}">${escapeHtml(item.path)}</span>
+      <button class="icon-button danger" type="button" data-media-library-remove title="删除">×</button>
+    `;
+    list.appendChild(row);
+  });
+  renderMediaLibrarySelect(kind);
+}
+
+function renderAllMediaLibraries() {
+  Object.keys(mediaLibraryConfigs).forEach((kind) => renderMediaLibrary(kind));
+}
+
+async function importMediaLibrary(kind) {
+  const config = mediaLibraryConfigs[kind];
+  if (!config) return;
+  const selected = await window.huApp.chooseFile({
+    multiSelections: true,
+    filters: [{ name: config.filterName, extensions: config.extensions }]
+  });
+  const paths = Array.isArray(selected) ? selected : (selected ? [selected] : []);
+  if (!paths.length) return;
+  const next = normalizeMediaLibrary([
+    ...collectMediaLibraryFromUi(kind),
+    ...paths.map((mediaPath) => ({ path: mediaPath }))
+  ], config.extensions);
+  settings[config.settingKey] = next;
+  renderMediaLibrary(kind);
 }
 
 function fontLibraryWithCurrentPath(currentPath) {
@@ -1226,6 +1433,10 @@ function collectSettings() {
   next.pipRules = collectPipRules();
   next.textEffectKeywordRules = collectTextEffectKeywordRules();
   next.fontLibrary = collectFontLibraryFromUi();
+  next.bgmLibrary = collectMediaLibraryFromUi('bgm');
+  next.sfxLibrary = collectMediaLibraryFromUi('sfx');
+  next.openingVideoLibrary = collectMediaLibraryFromUi('openingVideo');
+  next.pipMaterialLibrary = collectMediaLibraryFromUi('pipMaterial');
   next.previewVisibleObjects = [...previewVisibleKinds];
   next.accountTemplates = next.chanjingAccountIndex && next.currentTemplateId
     ? stashCurrentTemplate(next.chanjingAccountIndex, next.currentTemplateId, next)
@@ -1244,6 +1455,10 @@ function fillSettings(value) {
   settings.chanjingAccounts = normalizeAccounts(settings.chanjingAccounts);
   settings.chanjingAssetOverrides = normalizeAssetOverrides(settings.chanjingAssetOverrides);
   settings.fontLibrary = normalizeFontLibrary(settings.fontLibrary);
+  settings.bgmLibrary = normalizeMediaLibraryForKind('bgm', settings.bgmLibrary);
+  settings.sfxLibrary = normalizeMediaLibraryForKind('sfx', settings.sfxLibrary);
+  settings.openingVideoLibrary = normalizeMediaLibraryForKind('openingVideo', settings.openingVideoLibrary);
+  settings.pipMaterialLibrary = normalizeMediaLibraryForKind('pipMaterial', settings.pipMaterialLibrary);
   Object.assign(settings, normalizeSilenceTrimSettings(settings));
   settings.accountTemplates = migrateLegacyAccountTemplates(settings.accountTemplates, settings.accountAssetTemplates);
   const accountTotal = settings.chanjingAccounts.length;
@@ -1335,6 +1550,7 @@ function fillSettings(value) {
   renderTextEffectKeywordRules(settings.textEffectKeywordRules);
   renderFontLibrary();
   syncFontSelectControls();
+  renderAllMediaLibraries();
   settings.textEffectIds = selectedTextEffects;
   syncPreviewVisibilityControls();
   syncPreviewStyleControls();
@@ -4313,7 +4529,7 @@ function validateBeforeRun() {
     ['textEffectFontPath', '花字字体文件'],
     ['disclaimerFontPath', '底部声明字体文件']
   ];
-  if (current.clipBgm) {
+  if (current.clipBgm && !normalizeMediaLibrary(current.bgmLibrary, mediaLibraryConfigs.bgm.extensions).length) {
     required.push(['bgmFile', 'BGM 文件']);
   }
   for (const [key, label] of required) {
@@ -4331,7 +4547,11 @@ function validateBeforeRun() {
     if (current.useOpeningVideoFile && !current.openingVideoFile) {
       throw new Error('请先选择：指定开头视频文件');
     }
-    if (!current.useOpeningVideoFile && !current.openingVideoFolder) {
+    if (
+      !current.useOpeningVideoFile
+      && !current.openingVideoFolder
+      && !normalizeMediaLibrary(current.openingVideoLibrary, mediaLibraryConfigs.openingVideo.extensions).length
+    ) {
       throw new Error('请先填写：开头视频文件夹');
     }
   }
@@ -4343,7 +4563,15 @@ function validateBeforeRun() {
     if (hasPartialPipRow) {
       throw new Error('自定义画中画每一行都要填写关键词，并按“使用指定”状态填写素材文件或素材文件夹');
     }
-    if (!hasCompletePipRow && !current.pipFolder) {
+    if (current.usePipMaterialFile && !current.pipMaterialFile) {
+      throw new Error('请先选择：指定画中画素材文件');
+    }
+    if (
+      !hasCompletePipRow
+      && !current.usePipMaterialFile
+      && !current.pipFolder
+      && !normalizeMediaLibrary(current.pipMaterialLibrary, mediaLibraryConfigs.pipMaterial.extensions).length
+    ) {
       throw new Error('请先填写：画中画文件夹');
     }
     if (!hasCompletePipRow && !String(current.pipKeywords || '').trim()) {
@@ -4362,7 +4590,12 @@ function validateBeforeRun() {
   if (current.clipTextEffects && current.useSfxFile && !current.sfxFile) {
     throw new Error('请先选择：指定音效文件');
   }
-  if (current.clipTextEffects && !current.useSfxFile && !current.sfxFolder) {
+  if (
+    current.clipTextEffects
+    && !current.useSfxFile
+    && !current.sfxFolder
+    && !normalizeMediaLibrary(current.sfxLibrary, mediaLibraryConfigs.sfx.extensions).length
+  ) {
     throw new Error('请先填写：音效文件夹');
   }
   if (current.useSfxFile && !current.sfxFile) {
@@ -4610,6 +4843,29 @@ async function init() {
     if (!event.target.closest('[data-font-library-name]')) return;
     settings.fontLibrary = collectFontLibraryFromUi();
     syncFontSelectControls();
+  });
+  Object.entries(mediaLibraryConfigs).forEach(([kind, config]) => {
+    $(config.importButtonId)?.addEventListener('click', () => importMediaLibrary(kind));
+    $(config.listId)?.addEventListener('click', (event) => {
+      const remove = event.target.closest('[data-media-library-remove]');
+      if (!remove) return;
+      remove.closest('[data-media-library-path]')?.remove();
+      settings[config.settingKey] = collectMediaLibraryFromUi(kind);
+      renderMediaLibrary(kind);
+    });
+    $(config.listId)?.addEventListener('input', (event) => {
+      if (!event.target.closest('[data-media-library-name]')) return;
+      settings[config.settingKey] = collectMediaLibraryFromUi(kind);
+      renderMediaLibrarySelect(kind);
+    });
+    $(config.selectId)?.addEventListener('change', () => {
+      const target = $(config.fileFieldId);
+      if (target) target.value = $(config.selectId).value;
+      settings[config.fileFieldId] = $(config.selectId).value;
+    });
+    $(config.fileFieldId)?.addEventListener('input', () => {
+      renderMediaLibrarySelect(kind);
+    });
   });
   $('pipRuleList')?.addEventListener('click', async (event) => {
     const removeButton = event.target.closest('[data-pip-rule-remove]');
@@ -4863,8 +5119,12 @@ async function init() {
       });
       if (selected) {
         $(btn.dataset.pickAudio).value = selected;
+        if (btn.dataset.pickAudio === 'bgmFile') {
+          renderMediaLibrarySelect('bgm');
+        }
         if (btn.dataset.pickAudio === 'sfxFile' && $('useSfxFile')) {
           $('useSfxFile').checked = true;
+          renderMediaLibrarySelect('sfx');
         }
       }
     });
@@ -4879,6 +5139,7 @@ async function init() {
         $(btn.dataset.pickVideo).value = selected;
         if (btn.dataset.pickVideo === 'openingVideoFile' && $('useOpeningVideoFile')) {
           $('useOpeningVideoFile').checked = true;
+          renderMediaLibrarySelect('openingVideo');
         }
       }
     });
@@ -4891,7 +5152,13 @@ async function init() {
           { name: 'Media', extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'pdf'] }
         ]
       });
-      if (selected) $(btn.dataset.pickMedia).value = selected;
+      if (selected) {
+        $(btn.dataset.pickMedia).value = selected;
+        if (btn.dataset.pickMedia === 'pipMaterialFile') {
+          if ($('usePipMaterialFile')) $('usePipMaterialFile').checked = true;
+          renderMediaLibrarySelect('pipMaterial');
+        }
+      }
     });
   });
 

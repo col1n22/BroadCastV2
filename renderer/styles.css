@@ -559,6 +559,29 @@ textarea {
   background: #f8fafc;
 }
 
+.media-library-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.media-library-section h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.media-library-section .hint {
+  margin-top: 4px;
+}
+
+.media-library-section .font-library-list {
+  max-height: 180px;
+}
+
 .pip-rule-row,
 .text-effect-keyword-rule-row {
   display: grid;

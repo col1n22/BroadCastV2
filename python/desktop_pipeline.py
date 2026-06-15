@@ -471,14 +471,60 @@ def media_files(folder, extensions):
     )
 
 
+def media_library_paths(settings, key, extensions):
+    raw = settings.get(key)
+    if isinstance(raw, str):
+        if not raw.strip():
+            raw = []
+        else:
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                raw = [raw]
+    if not isinstance(raw, list):
+        return []
+    paths = []
+    seen = set()
+    for item in raw:
+        value = item.get("path") if isinstance(item, dict) else item
+        text = str(value or "").strip()
+        if not text:
+            continue
+        path = Path(text)
+        key_text = str(path).lower()
+        if key_text in seen or not path.exists() or path.suffix.lower() not in extensions:
+            continue
+        seen.add(key_text)
+        paths.append(path)
+    return paths
+
+
+def validate_media_file(path, label, extensions):
+    if not path.exists():
+        raise SystemExit(f"{label}不存在：{path}")
+    if path.suffix.lower() not in extensions:
+        raise SystemExit(f"{label}不是支持的格式：{path}")
+    return path
+
+
+def choose_bgm_file(settings):
+    selected = str(settings.get("bgmFile") or "").strip()
+    if selected:
+        return validate_media_file(Path(selected), "BGM 文件", AUDIO_EXTS), "fixed"
+    library = media_library_paths(settings, "bgmLibrary", AUDIO_EXTS)
+    if library:
+        return random.choice(library), "library"
+    raise SystemExit("缺少 BGM 文件，请先在 BGM 库里导入或选择 BGM")
+
+
 def choose_opening_video(settings):
     if bool_setting(settings.get("useOpeningVideoFile")):
         path = Path(require(settings.get("openingVideoFile"), "指定开头视频文件"))
-        if not path.exists():
-            raise SystemExit(f"指定开头视频文件不存在：{path}")
-        if path.suffix.lower() not in VIDEO_EXTS:
-            raise SystemExit(f"指定开头视频不是支持的视频格式：{path}")
-        return path, "fixed"
+        return validate_media_file(path, "指定开头视频文件", VIDEO_EXTS), "fixed"
+
+    library = media_library_paths(settings, "openingVideoLibrary", VIDEO_EXTS)
+    if library:
+        return random.choice(library), "library"
 
     folder = Path(require(settings.get("openingVideoFolder"), "开头视频文件夹"))
     if not folder.exists():
@@ -490,6 +536,14 @@ def choose_opening_video(settings):
 
 
 def choose_pip_sources(settings):
+    if bool_setting(settings.get("usePipMaterialFile")):
+        path = Path(require(settings.get("pipMaterialFile"), "指定画中画素材文件"))
+        return [validate_media_file(path, "指定画中画素材文件", PIP_MEDIA_EXTS)]
+
+    library = media_library_paths(settings, "pipMaterialLibrary", PIP_MEDIA_EXTS)
+    if library:
+        return library
+
     folder = Path(require(settings.get("pipFolder"), "画中画文件夹"))
     if not folder.exists():
         raise SystemExit(f"画中画文件夹不存在：{folder}")
@@ -550,6 +604,10 @@ def pip_rule_items(settings):
 
 
 def choose_self_intro_sources(settings):
+    library = media_library_paths(settings, "pipMaterialLibrary", PIP_MEDIA_EXTS)
+    if library:
+        return library
+
     folder_value = str(settings.get("pipFolder") or "").strip()
     if folder_value:
         folder = Path(folder_value)
@@ -639,11 +697,11 @@ def backing_exclusive_sentence_indices_for_text(text):
 def choose_text_effect_sfx(settings):
     if bool_setting(settings.get("useSfxFile")):
         path = Path(require(settings.get("sfxFile"), "指定音效文件"))
-        if not path.exists():
-            raise SystemExit(f"指定音效文件不存在：{path}")
-        if path.suffix.lower() not in AUDIO_EXTS:
-            raise SystemExit(f"指定音效文件不是支持的音频格式：{path}")
-        return path, "fixed"
+        return validate_media_file(path, "指定音效文件", AUDIO_EXTS), "fixed"
+
+    library = media_library_paths(settings, "sfxLibrary", AUDIO_EXTS)
+    if library:
+        return random.choice(library), "library"
 
     folder_value = str(settings.get("sfxFolder") or "").strip()
     if not folder_value:
@@ -1954,7 +2012,10 @@ def apply_settings(settings, bundle):
     caption_font = Path(require(settings.get("captionFontPath"), "字幕字体文件"))
     text_effect_font = Path(settings.get("textEffectFontPath") or caption_font)
     disclaimer_font = Path(settings.get("disclaimerFontPath") or caption_font)
-    bgm_file = Path(require(settings.get("bgmFile"), "BGM 文件")) if clip_enabled(settings, "clipBgm", True) else None
+    bgm_file = None
+    bgm_mode = "disabled"
+    if clip_enabled(settings, "clipBgm", True):
+        bgm_file, bgm_mode = choose_bgm_file(settings)
     output_dir = Path(require(settings.get("outputDir"), "输出目录"))
     output_subdir = safe_output_subdir(settings.get("outputSubdir"))
     if output_subdir:
@@ -1967,8 +2028,6 @@ def apply_settings(settings, bundle):
         raise SystemExit(f"花字字体不存在：{text_effect_font}")
     if not disclaimer_font.exists():
         raise SystemExit(f"底部声明字体不存在：{disclaimer_font}")
-    if bgm_file and not bgm_file.exists():
-        raise SystemExit(f"BGM 文件不存在：{bgm_file}")
     if clip_enabled(settings, "clipLogo", False):
         if not settings.get("logoFile"):
             settings["logoFile"] = str(bundle / "assets" / "template_assets" / "medical_logo_ref_1080.png")
@@ -2008,6 +2067,7 @@ def apply_settings(settings, bundle):
         "text_effect_font": text_effect_font,
         "disclaimer_font": disclaimer_font,
         "bgm_file": bgm_file,
+        "bgm_mode": bgm_mode,
         "output_dir": output_dir,
         "bundle": bundle,
     }
@@ -3574,6 +3634,7 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
                 slug=slug,
                 output=str(packaged_with_logo),
             )
+        report_extra["bgm_mode"] = runtime.get("bgm_mode", "")
         tighten_and_mix_selected_bgm(
             packaged_for_tighten,
             final,

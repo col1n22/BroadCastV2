@@ -571,8 +571,25 @@
 
             <div class="settings-card">
               <h3>音效</h3>
+              <div class="media-library-section">
+                <div class="section-row">
+                  <div>
+                    <h4>BGM库</h4>
+                    <p class="hint">导入后可固定选择，也可以让每条从库里随机。</p>
+                  </div>
+                  <button id="btnImportBgmLibrary" class="button secondary small" type="button">导入 BGM</button>
+                </div>
+                <div class="font-library-meta">
+                  <span id="bgmLibraryCount">0 个BGM</span>
+                </div>
+                <div id="bgmLibraryList" class="font-library-list"></div>
+                <div class="field">
+                  <label>当前 BGM</label>
+                  <select id="bgmLibrarySelect"></select>
+                </div>
+              </div>
               <div class="field">
-                <label>BGM 文件</label>
+                <label>手动 BGM 文件</label>
                 <div class="path-row">
                   <input id="bgmFile" />
                   <button class="icon-button" data-pick-audio="bgmFile" title="选择音频">...</button>
@@ -588,6 +605,23 @@
                   <option value="after_title">标题结束后 BGM</option>
                   <option value="full">全片 BGM</option>
                 </select>
+              </div>
+              <div class="media-library-section">
+                <div class="section-row">
+                  <div>
+                    <h4>音效库</h4>
+                    <p class="hint">不勾选使用指定时，花字/关键词音效会从音效库随机选择。</p>
+                  </div>
+                  <button id="btnImportSfxLibrary" class="button secondary small" type="button">导入音效</button>
+                </div>
+                <div class="font-library-meta">
+                  <span id="sfxLibraryCount">0 个音效</span>
+                </div>
+                <div id="sfxLibraryList" class="font-library-list"></div>
+                <div class="field">
+                  <label>库内指定音效</label>
+                  <select id="sfxLibrarySelect"></select>
+                </div>
               </div>
               <div class="field">
                 <label>音效文件夹</label>
@@ -616,6 +650,23 @@
 
             <div class="settings-card">
               <h3>视频内容</h3>
+              <div class="media-library-section">
+                <div class="section-row">
+                  <div>
+                    <h4>开头视频库</h4>
+                    <p class="hint">标题动画开启后，不勾选使用指定时会从库里随机选择。</p>
+                  </div>
+                  <button id="btnImportOpeningVideoLibrary" class="button secondary small" type="button">导入开头视频</button>
+                </div>
+                <div class="font-library-meta">
+                  <span id="openingVideoLibraryCount">0 个开头视频</span>
+                </div>
+                <div id="openingVideoLibraryList" class="font-library-list"></div>
+                <div class="field">
+                  <label>库内指定开头视频</label>
+                  <select id="openingVideoLibrarySelect"></select>
+                </div>
+              </div>
               <div class="field">
                 <label>开头视频文件夹</label>
                 <div class="path-row">
@@ -661,11 +712,36 @@
 
             <div class="settings-card">
               <h3>画中画</h3>
+              <div class="media-library-section">
+                <div class="section-row">
+                  <div>
+                    <h4>画中画素材库</h4>
+                    <p class="hint">不勾选使用指定时，关键词画中画会从素材库随机选择。</p>
+                  </div>
+                  <button id="btnImportPipMaterialLibrary" class="button secondary small" type="button">导入素材</button>
+                </div>
+                <div class="font-library-meta">
+                  <span id="pipMaterialLibraryCount">0 个画中画素材</span>
+                </div>
+                <div id="pipMaterialLibraryList" class="font-library-list"></div>
+                <div class="field">
+                  <label>库内指定素材</label>
+                  <select id="pipMaterialLibrarySelect"></select>
+                </div>
+              </div>
               <div class="field">
                 <label>素材文件夹</label>
                 <div class="path-row">
                   <input id="pipFolder" />
                   <button class="icon-button" data-pick-dir="pipFolder" title="选择目录">...</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>指定画中画素材文件</label>
+                <div class="path-row with-toggle">
+                  <input id="pipMaterialFile" />
+                  <button class="icon-button" data-pick-media="pipMaterialFile" title="选择素材">...</button>
+                  <label class="inline-check"><input id="usePipMaterialFile" type="checkbox" /><span>使用指定</span></label>
                 </div>
               </div>
               <div class="field">
