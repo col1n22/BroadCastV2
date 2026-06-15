@@ -291,10 +291,7 @@
                 <h4>标题样式</h4>
                 <div class="field">
                   <label>标题字体文件</label>
-                  <div class="path-row">
-                    <input data-preview-style-target="titleFontPath" />
-                    <button class="icon-button" type="button" data-preview-pick-font="titleFontPath" title="选择字体">...</button>
-                  </div>
+                  <select data-preview-font-select="titleFontPath"></select>
                 </div>
                 <div class="object-style-grid title-style-grid">
                   <span class="style-head">行</span>
@@ -320,10 +317,7 @@
                 <h4>字幕样式</h4>
                 <div class="field">
                   <label>字幕字体文件</label>
-                  <div class="path-row">
-                    <input data-preview-style-target="captionFontPath" />
-                    <button class="icon-button" type="button" data-preview-pick-font="captionFontPath" title="选择字体">...</button>
-                  </div>
+                  <select data-preview-font-select="captionFontPath"></select>
                 </div>
                 <div class="object-style-grid">
                   <span class="style-head">字体颜色</span>
@@ -339,10 +333,7 @@
                 <h4>花字样式</h4>
                 <div class="field">
                   <label>花字字体文件</label>
-                  <div class="path-row">
-                    <input data-preview-style-target="textEffectFontPath" />
-                    <button class="icon-button" type="button" data-preview-pick-font="textEffectFontPath" title="选择字体">...</button>
-                  </div>
+                  <select data-preview-font-select="textEffectFontPath"></select>
                 </div>
                 <div class="object-style-grid">
                   <span class="style-head">字体颜色</span>
@@ -358,10 +349,7 @@
                 <h4>底部声明样式</h4>
                 <div class="field">
                   <label>底部声明字体文件</label>
-                  <div class="path-row">
-                    <input data-preview-style-target="disclaimerFontPath" />
-                    <button class="icon-button" type="button" data-preview-pick-font="disclaimerFontPath" title="选择字体">...</button>
-                  </div>
+                  <select data-preview-font-select="disclaimerFontPath"></select>
                 </div>
                 <div class="object-style-grid">
                   <span class="style-head">字体颜色</span>
@@ -534,7 +522,7 @@
           <div class="toolbar">
             <div>
               <h2>风格</h2>
-              <p class="muted">统一管理 BGM、音效、视频素材和特效规则；字体、颜色、描边在模板管理里按账号模板单独保存。</p>
+              <p class="muted">统一管理字体库、BGM、音效、视频素材和特效规则；模板具体使用哪款字体、颜色、描边仍在模板管理里单独保存。</p>
             </div>
             <button id="btnSaveStyleSettings" class="button primary">保存风格</button>
           </div>
@@ -567,6 +555,20 @@
           </div>
 
           <div class="settings-grid style-settings-grid">
+            <div class="settings-card">
+              <div class="section-row">
+                <div>
+                  <h3>字体库</h3>
+                  <p class="hint">一次导入多个字体后，模板管理里的标题、字幕、花字和声明字体都从这里选择。</p>
+                </div>
+                <button id="btnImportFonts" class="button secondary small" type="button">导入字体</button>
+              </div>
+              <div class="font-library-meta">
+                <span id="fontLibraryCount">0 个字体</span>
+              </div>
+              <div id="fontLibraryList" class="font-library-list"></div>
+            </div>
+
             <div class="settings-card">
               <h3>音效</h3>
               <div class="field">
@@ -731,6 +733,24 @@
                 <label>字幕缓冲时间（秒）</label>
                 <input id="captionBufferSeconds" type="number" min="0" max="0.5" step="0.01" />
                 <p class="hint">上一段字幕会提前结束这段时间，默认 0.12 秒。</p>
+              </div>
+              <div class="field">
+                <label class="inline-check standalone"><input id="trimSilenceEnabled" type="checkbox" /><span>剪辑气口/静音停顿</span></label>
+                <p class="hint">开启后按下面参数剪掉低音量停顿；默认保持当前配置。</p>
+              </div>
+              <div class="silence-trim-grid">
+                <div class="field">
+                  <label>静音超过（秒）</label>
+                  <input id="silenceMinSeconds" type="number" min="0.05" max="2" step="0.01" />
+                </div>
+                <div class="field">
+                  <label>单侧保留缓冲（秒）</label>
+                  <input id="silenceKeepBufferSeconds" type="number" min="0" max="0.5" step="0.01" />
+                </div>
+                <div class="field">
+                  <label>中间总保留（自动）</label>
+                  <input id="silenceMiddleKeepSeconds" type="number" readonly />
+                </div>
               </div>
             </div>
           </div>

@@ -2610,9 +2610,29 @@ def tighten_and_mix_selected_bgm(
     settings = settings or {}
     sfx_starts_original = sorted(float(start) for start in (sfx_starts_original or []))
     total = batch.duration(input_path)
-    silences = batch.detect_silences(input_path)
-    keep, cuts = batch.build_keep_segments(total, silences)
-    batch.render_tight_no_bgm(input_path, no_bgm, keep)
+    trim_silence_enabled = settings.get("trimSilenceEnabled", True) is not False
+    silence_min_seconds = bounded_number(settings.get("silenceMinSeconds"), 0.18, 0.05, 2.0)
+    silence_keep_buffer = bounded_number(settings.get("silenceKeepBufferSeconds"), 0.04, 0.0, 0.5)
+    if trim_silence_enabled:
+        previous_min_silence = getattr(batch, "MIN_SILENCE", "0.18")
+        previous_middle_keep = getattr(batch, "MIDDLE_KEEP", 0.08)
+        previous_edge_keep = getattr(batch, "EDGE_KEEP", 0.04)
+        batch.MIN_SILENCE = f"{silence_min_seconds:.3f}"
+        batch.EDGE_KEEP = silence_keep_buffer
+        batch.MIDDLE_KEEP = silence_keep_buffer * 2
+        try:
+            silences = batch.detect_silences(input_path)
+            keep, cuts = batch.build_keep_segments(total, silences)
+        finally:
+            batch.MIN_SILENCE = previous_min_silence
+            batch.MIDDLE_KEEP = previous_middle_keep
+            batch.EDGE_KEEP = previous_edge_keep
+        batch.render_tight_no_bgm(input_path, no_bgm, keep)
+    else:
+        silences = []
+        cuts = []
+        keep = [(0.0, total)]
+        shutil.copy2(input_path, no_bgm)
     bgm_start_mode = str(bgm_start_mode or "after_title").strip()
     if bgm_start_mode not in {"full", "after_title"}:
         bgm_start_mode = "after_title"
@@ -2661,6 +2681,10 @@ def tighten_and_mix_selected_bgm(
         f"original_duration={total:.3f}",
         f"tight_duration={new_total:.3f}",
         f"removed={total - new_total:.3f}",
+        f"trim_silence_enabled={trim_silence_enabled}",
+        f"silence_min_seconds={silence_min_seconds:.3f}",
+        f"silence_keep_buffer_seconds={silence_keep_buffer:.3f}",
+        f"silence_middle_keep_seconds={silence_keep_buffer * 2:.3f}",
         f"silence_count={len(silences)}",
         f"cut_count={len(cuts)}",
         f"bgm_enabled={bool(bgm_enabled and bgm_file)}",

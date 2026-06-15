@@ -18,6 +18,7 @@ const fields = [
   'modelBaseUrl',
   'modelApiKey',
   'modelName',
+  'fontLibrary',
   'titleFontPath',
   'captionFontPath',
   'textEffectFontPath',
@@ -75,6 +76,9 @@ const fields = [
   'captionOutlineColor',
   'captionOutlineSize',
   'captionBufferSeconds',
+  'trimSilenceEnabled',
+  'silenceMinSeconds',
+  'silenceKeepBufferSeconds',
   'disclaimerColor',
   'disclaimerOutlineColor',
   'disclaimerOutlineSize',
@@ -1029,6 +1033,126 @@ function templateForSelection(accountIndex, templateId) {
   return template?.config || templateFallback();
 }
 
+function fileBaseName(filePath) {
+  const raw = String(filePath || '').trim();
+  const base = raw.split(/[\\/]/).filter(Boolean).pop() || raw;
+  return base.replace(/\.(ttf|otf|ttc)$/i, '') || base;
+}
+
+function normalizeFontLibrary(value) {
+  const raw = Array.isArray(value) ? value : [];
+  const seen = new Set();
+  const fonts = [];
+  raw.forEach((item) => {
+    const fontPath = String(typeof item === 'string' ? item : item?.path || '').trim();
+    if (!fontPath || !/\.(ttf|otf|ttc)$/i.test(fontPath)) return;
+    const key = fontPath.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    const name = String(typeof item === 'string' ? '' : item?.name || '').trim() || fileBaseName(fontPath);
+    fonts.push({ name, path: fontPath });
+  });
+  return fonts;
+}
+
+function fontLibraryWithCurrentPath(currentPath) {
+  const fonts = normalizeFontLibrary(settings.fontLibrary);
+  const pathText = String(currentPath || '').trim();
+  if (pathText && !fonts.some((font) => font.path.toLowerCase() === pathText.toLowerCase())) {
+    fonts.push({ name: `${fileBaseName(pathText)}（当前字体）`, path: pathText });
+  }
+  return fonts;
+}
+
+function collectFontLibraryFromUi() {
+  const list = $('fontLibraryList');
+  if (!list) return normalizeFontLibrary(settings.fontLibrary);
+  const rows = Array.from(list.querySelectorAll('[data-font-library-path]'));
+  return normalizeFontLibrary(rows.map((row) => ({
+    name: row.querySelector('[data-font-library-name]')?.value || row.dataset.fontLibraryName || '',
+    path: row.dataset.fontLibraryPath || ''
+  })));
+}
+
+function renderFontLibrary() {
+  const list = $('fontLibraryList');
+  const count = $('fontLibraryCount');
+  if (!list) return;
+  const fonts = normalizeFontLibrary(settings.fontLibrary);
+  if (count) count.textContent = `${fonts.length} 个字体`;
+  list.innerHTML = '';
+  if (!fonts.length) {
+    list.innerHTML = '<div class="font-library-empty">还没有导入字体</div>';
+    return;
+  }
+  fonts.forEach((font) => {
+    const row = document.createElement('div');
+    row.className = 'font-library-row';
+    row.dataset.fontLibraryPath = font.path;
+    row.dataset.fontLibraryName = font.name;
+    row.innerHTML = `
+      <input data-font-library-name value="${escapeHtml(font.name)}" />
+      <span title="${escapeHtml(font.path)}">${escapeHtml(font.path)}</span>
+      <button class="icon-button danger" type="button" data-font-library-remove title="删除">×</button>
+    `;
+    list.appendChild(row);
+  });
+}
+
+function renderFontSelectOptions(targetId = '') {
+  document.querySelectorAll('[data-preview-font-select]').forEach((select) => {
+    const target = select.dataset.previewFontSelect;
+    if (targetId && target !== targetId) return;
+    const source = $(target);
+    const currentPath = String(source?.value || settings[target] || '').trim();
+    const fonts = fontLibraryWithCurrentPath(currentPath);
+    select.innerHTML = '';
+    if (!fonts.length) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = '请先在风格里导入字体';
+      select.appendChild(option);
+      select.value = '';
+      select.disabled = true;
+      return;
+    }
+    fonts.forEach((font) => {
+      const option = document.createElement('option');
+      option.value = font.path;
+      option.textContent = font.name;
+      option.title = font.path;
+      select.appendChild(option);
+    });
+    select.disabled = false;
+    select.value = currentPath && fonts.some((font) => font.path === currentPath)
+      ? currentPath
+      : fonts[0].path;
+    if (source && !source.value && select.value) {
+      source.value = select.value;
+    }
+  });
+}
+
+function syncFontSelectControls(targetId = '') {
+  renderFontSelectOptions(targetId);
+}
+
+async function importFontsToLibrary() {
+  const selected = await window.huApp.chooseFile({
+    multiSelections: true,
+    filters: [{ name: 'Fonts', extensions: ['ttf', 'otf', 'ttc'] }]
+  });
+  const paths = Array.isArray(selected) ? selected : (selected ? [selected] : []);
+  if (!paths.length) return;
+  const next = normalizeFontLibrary([
+    ...collectFontLibraryFromUi(),
+    ...paths.map((fontPath) => ({ path: fontPath }))
+  ]);
+  settings.fontLibrary = next;
+  renderFontLibrary();
+  syncFontSelectControls();
+}
+
 function collectSettingsBase() {
   const next = {};
   for (const field of fields) {
@@ -1091,6 +1215,7 @@ function collectSettings() {
   requiredClipFields.forEach((field) => {
     next[field] = true;
   });
+  Object.assign(next, normalizeSilenceTrimSettings(next));
   next.pipX = Number(next.previewPipX || next.pipX || previewDefaults.pip.x);
   next.pipY = Number(next.previewPipY || next.pipY || previewDefaults.pip.y);
   next.pipHeight = Number(next.previewPipH || next.pipHeight || previewDefaults.pip.h);
@@ -1100,6 +1225,7 @@ function collectSettings() {
     .filter((id) => textEffectIds.includes(id));
   next.pipRules = collectPipRules();
   next.textEffectKeywordRules = collectTextEffectKeywordRules();
+  next.fontLibrary = collectFontLibraryFromUi();
   next.previewVisibleObjects = [...previewVisibleKinds];
   next.accountTemplates = next.chanjingAccountIndex && next.currentTemplateId
     ? stashCurrentTemplate(next.chanjingAccountIndex, next.currentTemplateId, next)
@@ -1117,6 +1243,8 @@ function fillSettings(value) {
   settings = { ...(value || {}) };
   settings.chanjingAccounts = normalizeAccounts(settings.chanjingAccounts);
   settings.chanjingAssetOverrides = normalizeAssetOverrides(settings.chanjingAssetOverrides);
+  settings.fontLibrary = normalizeFontLibrary(settings.fontLibrary);
+  Object.assign(settings, normalizeSilenceTrimSettings(settings));
   settings.accountTemplates = migrateLegacyAccountTemplates(settings.accountTemplates, settings.accountAssetTemplates);
   const accountTotal = settings.chanjingAccounts.length;
   const legacySelectionMode = String(settings.assetSelectionMode || '').trim().toLowerCase();
@@ -1199,11 +1327,14 @@ function fillSettings(value) {
       el.value = settings[field] ?? '';
     }
   }
+  syncSilenceTrimFields();
   document.querySelectorAll('[data-text-effect-id]').forEach((el) => {
     el.checked = selectedTextEffects.includes(el.dataset.textEffectId);
   });
   renderPipRules(settings.pipRules);
   renderTextEffectKeywordRules(settings.textEffectKeywordRules);
+  renderFontLibrary();
+  syncFontSelectControls();
   settings.textEffectIds = selectedTextEffects;
   syncPreviewVisibilityControls();
   syncPreviewStyleControls();
@@ -1252,6 +1383,33 @@ function previewField(kind, suffix) {
 
 function clampNumber(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function normalizeSilenceTrimSettings(source = {}) {
+  const minSeconds = clampNumber(Number(source.silenceMinSeconds || 0.18), 0.05, 2);
+  const keepBuffer = clampNumber(Number(source.silenceKeepBufferSeconds ?? 0.04), 0, 0.5);
+  return {
+    trimSilenceEnabled: source.trimSilenceEnabled !== false,
+    silenceMinSeconds: Number(minSeconds.toFixed(3)),
+    silenceKeepBufferSeconds: Number(keepBuffer.toFixed(3)),
+    silenceMiddleKeepSeconds: Number((keepBuffer * 2).toFixed(3))
+  };
+}
+
+function syncSilenceTrimFields() {
+  const enabled = Boolean($('trimSilenceEnabled')?.checked);
+  const normalized = normalizeSilenceTrimSettings({
+    trimSilenceEnabled: enabled,
+    silenceMinSeconds: $('silenceMinSeconds')?.value || settings.silenceMinSeconds,
+    silenceKeepBufferSeconds: $('silenceKeepBufferSeconds')?.value || settings.silenceKeepBufferSeconds
+  });
+  if ($('silenceMiddleKeepSeconds')) {
+    $('silenceMiddleKeepSeconds').value = String(normalized.silenceMiddleKeepSeconds);
+  }
+  ['silenceMinSeconds', 'silenceKeepBufferSeconds', 'silenceMiddleKeepSeconds'].forEach((id) => {
+    const el = $(id);
+    if (el) el.disabled = !enabled;
+  });
 }
 
 function getPreviewBox(kind) {
@@ -4439,6 +4597,20 @@ async function init() {
   });
   $('btnAddPipRule')?.addEventListener('click', () => addPipRuleRow());
   $('btnAddTextEffectKeywordRule')?.addEventListener('click', () => addTextEffectKeywordRuleRow());
+  $('btnImportFonts')?.addEventListener('click', importFontsToLibrary);
+  $('fontLibraryList')?.addEventListener('click', (event) => {
+    const remove = event.target.closest('[data-font-library-remove]');
+    if (!remove) return;
+    remove.closest('[data-font-library-path]')?.remove();
+    settings.fontLibrary = collectFontLibraryFromUi();
+    renderFontLibrary();
+    syncFontSelectControls();
+  });
+  $('fontLibraryList')?.addEventListener('input', (event) => {
+    if (!event.target.closest('[data-font-library-name]')) return;
+    settings.fontLibrary = collectFontLibraryFromUi();
+    syncFontSelectControls();
+  });
   $('pipRuleList')?.addEventListener('click', async (event) => {
     const removeButton = event.target.closest('[data-pip-rule-remove]');
     if (removeButton) {
@@ -4589,6 +4761,11 @@ async function init() {
     });
   });
 
+  ['trimSilenceEnabled', 'silenceMinSeconds', 'silenceKeepBufferSeconds'].forEach((id) => {
+    const eventName = id === 'trimSilenceEnabled' ? 'change' : 'input';
+    $(id)?.addEventListener(eventName, syncSilenceTrimFields);
+  });
+
   [
     'titleFontPath',
     'captionFontPath',
@@ -4605,6 +4782,18 @@ async function init() {
       } else {
         updatePreviewFonts();
       }
+      schedulePreviewLayoutUpdate();
+    });
+  });
+
+  document.querySelectorAll('[data-preview-font-select]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const target = select.dataset.previewFontSelect;
+      const source = $(target);
+      if (!source) return;
+      source.value = select.value;
+      syncPreviewStyleControls(target);
+      updatePreviewFonts();
       schedulePreviewLayoutUpdate();
     });
   });

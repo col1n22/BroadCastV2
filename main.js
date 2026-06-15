@@ -82,6 +82,8 @@ function defaultLogoFile(bundlePath = bundledBundlePath()) {
 
 function defaultSettings() {
   const bundlePath = bundledBundlePath();
+  const defaultTitleFontPath = bundledFontPath(bundlePath, '尔雅新大黑（3500字试用版）.ttf');
+  const defaultCaptionFontPath = bundledFontPath(bundlePath, '优设书华体.ttf');
   return {
     pythonPath: bundledPythonPath(),
     bundlePath,
@@ -108,10 +110,14 @@ function defaultSettings() {
     modelBaseUrl: '',
     modelApiKey: '',
     modelName: '',
-    titleFontPath: bundledFontPath(bundlePath, '尔雅新大黑（3500字试用版）.ttf'),
-    captionFontPath: bundledFontPath(bundlePath, '优设书华体.ttf'),
-    textEffectFontPath: bundledFontPath(bundlePath, '优设书华体.ttf'),
-    disclaimerFontPath: bundledFontPath(bundlePath, '优设书华体.ttf'),
+    fontLibrary: [
+      { name: '尔雅新大黑', path: defaultTitleFontPath },
+      { name: '优设书华体', path: defaultCaptionFontPath }
+    ],
+    titleFontPath: defaultTitleFontPath,
+    captionFontPath: defaultCaptionFontPath,
+    textEffectFontPath: defaultCaptionFontPath,
+    disclaimerFontPath: defaultCaptionFontPath,
     bgmFile: path.join(bundlePath, 'assets', 'BGM', 'bgm2.mp3'),
     bgmVolumePercent: 22,
     clipPreset: 'title_bgm',
@@ -166,6 +172,9 @@ function defaultSettings() {
     captionOutlineColor: '#000000',
     captionOutlineSize: 8,
     captionBufferSeconds: 0.12,
+    trimSilenceEnabled: true,
+    silenceMinSeconds: 0.18,
+    silenceKeepBufferSeconds: 0.04,
     disclaimerColor: '#ffffff',
     disclaimerOutlineColor: '#000000',
     disclaimerOutlineSize: 0,
@@ -796,11 +805,14 @@ function findPreviewBackground(payload = {}) {
 }
 
 ipcMain.handle('dialog:file', async (_event, options = {}) => {
+  const properties = ['openFile'];
+  if (options.multiSelections) properties.push('multiSelections');
   const result = await dialog.showOpenDialog(mainWindow, {
-    properties: ['openFile'],
+    properties,
     filters: options.filters || [{ name: 'All files', extensions: ['*'] }]
   });
-  return result.canceled ? null : result.filePaths[0];
+  if (result.canceled) return null;
+  return options.multiSelections ? result.filePaths : result.filePaths[0];
 });
 
 ipcMain.handle('dialog:directory', async () => {
