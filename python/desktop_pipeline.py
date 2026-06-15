@@ -3160,6 +3160,14 @@ def recover_entry_from_previous_runs(slug, item, state_path, requested_asset=Non
     return None
 
 
+def is_chanjing_token_expired_error(error):
+    try:
+        payload = json.loads(str(error))
+    except Exception:
+        return "AccessToken" in str(error) and "失效" in str(error)
+    return payload.get("code") == 10400 or payload.get("msg") == "AccessToken已失效"
+
+
 def ensure_raw_video(item, index, assets, state_path, state, settings, force_fresh=False):
     slug = item["slug"]
     entry = state["items"].setdefault(slug, {})
@@ -3238,7 +3246,14 @@ def ensure_raw_video(item, index, assets, state_path, state, settings, force_fre
     deadline = time.time() + int(settings.get("timeoutMinutes") or 45) * 60
     poll_interval = max(5, int(settings.get("pollIntervalSeconds") or 20))
     while True:
-        status = batch.video_status(token, task_id)
+        try:
+            status = batch.video_status(token, task_id)
+        except RuntimeError as error:
+            if not is_chanjing_token_expired_error(error):
+                raise
+            log_json("chanjing_token_refresh", slug=slug, task_id=task_id)
+            token = batch.get_token()
+            continue
         entry["status"] = status.get("status")
         entry["progress"] = status.get("progress")
         entry["queue_status"] = status.get("queue_status")

@@ -853,6 +853,14 @@ def video_status(token, task_id):
     return res["data"]
 
 
+def is_token_expired_error(error):
+    try:
+        payload = json.loads(str(error))
+    except Exception:
+        return "AccessToken" in str(error) and "失效" in str(error)
+    return payload.get("code") == 10400 or payload.get("msg") == "AccessToken已失效"
+
+
 def download(url, path):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".download")
@@ -3031,7 +3039,14 @@ def main():
         for key, entry in state["items"].items():
             if only and key not in only:
                 continue
-            status = video_status(token, entry["task_id"])
+            try:
+                status = video_status(token, entry["task_id"])
+            except RuntimeError as error:
+                if not is_token_expired_error(error):
+                    raise
+                token = get_token()
+                print(f"refreshed token for {key}", flush=True)
+                continue
             entry["status"] = status.get("status")
             entry["progress"] = status.get("progress")
             entry["queue_status"] = status.get("queue_status")
