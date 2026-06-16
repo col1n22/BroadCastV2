@@ -51,6 +51,10 @@ batch = None
 BAD_VOICE_PERSON_IDS = {
     "C-29530f42cc1e483a9cb4c3327af3e41e": "胡老师_API_21",
 }
+FIXED_VOICE_AUDIO_MAN_ID = "C-74273aa7d0674244a2c6842dc7abc1a1"
+FIXED_VOICE_SOURCE_NAME = "胡老师_API_1-1"
+FIXED_VOICE_SOURCE_FILE = "1-1.mp4"
+FIXED_VOICE_SOURCE_PERSON_ID = "C-ace7291263664109b520ca5dcadf5098"
 
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -3366,34 +3370,27 @@ def settings_for_item(settings, item, ordinal, assets, job):
 def same_chanjing_asset(left, right):
     if not isinstance(left, dict) or not isinstance(right, dict):
         return False
-    left_key = (left.get("person_id"), left.get("file"))
-    right_key = (right.get("person_id"), right.get("file"))
+    left_key = (left.get("person_id"), left.get("file"), left.get("audio_man_id"))
+    right_key = (right.get("person_id"), right.get("file"), right.get("audio_man_id"))
     return left_key == right_key
 
 
-def asset_with_allowed_voice(asset, assets):
-    if asset.get("person_id") not in BAD_VOICE_PERSON_IDS:
-        return asset
-
-    candidates = [
-        candidate
-        for candidate in assets
-        if candidate.get("person_id") != asset.get("person_id")
-        and candidate.get("audio_man_id")
-        and candidate.get("audio_man_id") != asset.get("audio_man_id")
-    ]
-    if not candidates:
-        raise SystemExit(f"{asset.get('name') or asset.get('person_id')} 没有可替换的声音资产")
-
-    voice_source = random.choice(candidates)
+def asset_with_fixed_voice(asset, assets=None):
     updated = dict(asset)
-    updated["blocked_audio_man_id"] = asset.get("audio_man_id")
-    updated["audio_man_id"] = voice_source["audio_man_id"]
-    updated["audio_replaced"] = True
-    updated["audio_source_name"] = voice_source.get("name", "")
-    updated["audio_source_file"] = voice_source.get("file", "")
-    updated["audio_source_person_id"] = voice_source.get("person_id", "")
+    previous_audio = updated.get("audio_man_id")
+    updated["audio_man_id"] = FIXED_VOICE_AUDIO_MAN_ID
+    updated["voice_policy"] = "fixed_api_1_1"
+    updated["audio_source_name"] = FIXED_VOICE_SOURCE_NAME
+    updated["audio_source_file"] = FIXED_VOICE_SOURCE_FILE
+    updated["audio_source_person_id"] = FIXED_VOICE_SOURCE_PERSON_ID
+    if previous_audio and previous_audio != FIXED_VOICE_AUDIO_MAN_ID:
+        updated["blocked_audio_man_id"] = previous_audio
+        updated["audio_replaced"] = True
     return updated
+
+
+def asset_with_allowed_voice(asset, assets):
+    return asset_with_fixed_voice(asset, assets)
 
 
 def recover_entry_from_previous_runs(slug, item, state_path, requested_asset=None):
@@ -3459,6 +3456,8 @@ def ensure_raw_video(item, index, assets, state_path, state, settings, force_fre
     slug = item["slug"]
     entry = state["items"].setdefault(slug, {})
     requested_asset = selected_chanjing_asset(settings, assets)
+    if requested_asset:
+        requested_asset = asset_with_fixed_voice(requested_asset, assets)
     if force_fresh:
         entry = {}
         state["items"][slug] = entry
@@ -3481,8 +3480,17 @@ def ensure_raw_video(item, index, assets, state_path, state, settings, force_fre
         state["items"][slug] = entry
         task_id = None
     asset = requested_asset or (None if force_fresh else entry.get("asset")) or assets[(index - 1) % len(assets)]
-    if not task_id:
-        asset = asset_with_allowed_voice(asset, assets)
+    asset = asset_with_allowed_voice(asset, assets)
+    if task_id and not same_chanjing_asset(entry.get("asset"), asset):
+        log_json(
+            "state_asset_voice_changed",
+            slug=slug,
+            from_audio=(entry.get("asset") or {}).get("audio_man_id", ""),
+            to_audio=asset.get("audio_man_id", ""),
+        )
+        entry = {"text_hash": item["text_hash"]}
+        state["items"][slug] = entry
+        task_id = None
     entry["asset"] = asset
     raw_video = None
     if task_id:

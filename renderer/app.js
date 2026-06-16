@@ -2295,11 +2295,17 @@ function clearPreviewBackground() {
   bg?.classList.remove('has-media');
   if (image) {
     image.hidden = true;
+    image.onload = null;
+    image.onerror = null;
     image.removeAttribute('src');
   }
   if (video) {
     video.hidden = true;
     video.pause();
+    video.onloadeddata = null;
+    video.onloadedmetadata = null;
+    video.onseeked = null;
+    video.onerror = null;
     video.removeAttribute('src');
     video.load();
   }
@@ -2497,18 +2503,37 @@ function updateAssetManagerSourcePreview() {
     updateAssetManagerAddButtonState();
     return;
   }
-  if (placeholder) placeholder.textContent = '选择模板人物形象后预览';
-  if (asset.pic_url && image) {
-    image.src = asset.pic_url;
-    image.hidden = false;
-    if (placeholder) placeholder.hidden = true;
-    updateAssetManagerAddButtonState();
-    return;
-  }
-  if (asset.preview_url && video) {
-    video.src = asset.preview_url;
-    video.hidden = false;
-    video.muted = true;
+
+  const showPreviewFailure = () => {
+    if (image) {
+      image.hidden = true;
+      image.removeAttribute('src');
+    }
+    if (video) {
+      video.hidden = true;
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+    }
+    if (placeholder) {
+      placeholder.textContent = '预览加载失败，可继续添加模板';
+      placeholder.hidden = false;
+    }
+  };
+
+  const showVideoPreview = () => {
+    if (!asset.preview_url || !video) {
+      showPreviewFailure();
+      return;
+    }
+    if (placeholder) {
+      placeholder.textContent = '正在加载视频预览...';
+      placeholder.hidden = false;
+    }
+    video.onloadeddata = () => {
+      if (placeholder) placeholder.hidden = true;
+      video.pause();
+    };
     video.onloadedmetadata = () => {
       try {
         video.currentTime = Math.min(0.2, Math.max(0, Number(video.duration || 0) - 0.1));
@@ -2516,9 +2541,34 @@ function updateAssetManagerSourcePreview() {
         video.pause();
       }
     };
-    video.onseeked = () => video.pause();
-    if (placeholder) placeholder.hidden = true;
+    video.onseeked = () => {
+      if (placeholder) placeholder.hidden = true;
+      video.pause();
+    };
+    video.onerror = showPreviewFailure;
+    video.src = asset.preview_url;
+    video.hidden = false;
+  };
+
+  if (asset.pic_url && image) {
+    if (placeholder) {
+      placeholder.textContent = '正在加载封面预览...';
+      placeholder.hidden = false;
+    }
+    image.onload = () => {
+      if (placeholder) placeholder.hidden = true;
+    };
+    image.onerror = () => {
+      image.hidden = true;
+      image.removeAttribute('src');
+      showVideoPreview();
+    };
+    image.src = asset.pic_url;
+    image.hidden = false;
+    updateAssetManagerAddButtonState();
+    return;
   }
+  showVideoPreview();
   updateAssetManagerAddButtonState();
 }
 
