@@ -259,6 +259,22 @@ def ass_family_for_path(font_path, fallback):
     return fallback
 
 
+def configured_font_path(settings, key, fallback_key=None, label="字体文件"):
+    value = settings.get(key) or (settings.get(fallback_key) if fallback_key else None)
+    return Path(require(value, label))
+
+
+def copy_extra_font_assets(font_paths):
+    for extra_font in font_paths:
+        if not extra_font:
+            continue
+        for target_dir in (batch.FONT_DIR, batch.REMOTION_PUBLIC_DIR):
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target_path = target_dir / extra_font.name
+            if target_path.resolve() != extra_font.resolve():
+                shutil.copy2(extra_font, target_path)
+
+
 def normalized_hex_color(value, default):
     text = str(value or default).strip()
     if text.startswith("#"):
@@ -297,6 +313,105 @@ def ass_color(value, default="#ffffff", opacity_percent=100):
 def style_outline(settings, key, default):
     value = bounded_number(settings.get(key), default, 0, 80)
     return int(value) if value.is_integer() else round(value, 2)
+
+
+def style_spacing(settings, key, default=0):
+    value = bounded_number(settings.get(key), default, -20, 80)
+    return int(value) if value.is_integer() else round(value, 2)
+
+
+_FONT_SIZE_CACHE = {}
+
+
+def text_width_with_spacing(font, line, spacing=0):
+    text = str(line or "")
+    if not text:
+        return 0
+    return (font.getbbox(text)[2] - font.getbbox(text)[0]) + max(0, len(text) - 1) * float(spacing or 0)
+
+
+def font_for_path_size(font_path, size):
+    from PIL import ImageFont
+
+    key = (str(font_path), int(size))
+    font = _FONT_SIZE_CACHE.get(key)
+    if font is None:
+        font = ImageFont.truetype(str(font_path), int(size))
+        _FONT_SIZE_CACHE[key] = font
+    return font
+
+
+def fit_font_size_for_path(lines, font_path, max_size, min_size, max_width=None, spacing=0):
+    visible = [str(line or "") for line in lines if str(line or "")]
+    if not visible:
+        return max_size
+    width = max_width or getattr(batch, "SAFE_TEXT_WIDTH", 980)
+    try:
+        from PIL import ImageFont
+
+        path_text = str(font_path)
+        for size in range(int(max_size), int(min_size) - 1, -2):
+            font = font_for_path_size(path_text, size)
+            if all(text_width_with_spacing(font, line, spacing) <= width for line in visible):
+                return int(size)
+    except Exception:
+        return batch.fit_font_size(visible, int(max_size), int(min_size), max_width=width, role="title")
+    return int(min_size)
+
+
+def ass_rounded_rect_path(width, height, radius):
+    w = max(1, int(round(width)))
+    h = max(1, int(round(height)))
+    r = int(round(max(0, min(radius, w / 2, h / 2))))
+    if r <= 0:
+        return f"m 0 0 l {w} 0 l {w} {h} l 0 {h}"
+    k = 0.55228475
+
+    def n(value):
+        return int(round(value))
+
+    return (
+        f"m {r} 0 "
+        f"l {w - r} 0 "
+        f"b {n(w - r + k * r)} 0 {w} {n(r - k * r)} {w} {r} "
+        f"l {w} {h - r} "
+        f"b {w} {n(h - r + k * r)} {n(w - r + k * r)} {h} {w - r} {h} "
+        f"l {r} {h} "
+        f"b {n(r - k * r)} {h} 0 {n(h - r + k * r)} 0 {h - r} "
+        f"l 0 {r} "
+        f"b 0 {n(r - k * r)} {n(r - k * r)} 0 {r} 0"
+    )
+
+
+def title_background_enabled(settings, key):
+    if key in settings:
+        return bool_setting(settings.get(key))
+    return bool_setting(settings.get("titleBackgroundEnabled"))
+
+
+def title_background_dialogue(style, text, font_path, font_size, spacing, center_x, center_y, settings, title_end, enabled_key):
+    if not title_background_enabled(settings, enabled_key) or not text:
+        return None
+    padding_x = bounded_number(settings.get("titleBgPaddingX"), 36, 0, 180)
+    padding_y = bounded_number(settings.get("titleBgPaddingY"), 18, 0, 120)
+    radius = bounded_number(settings.get("titleBgRadius"), 12, 0, 120)
+    try:
+        font = font_for_path_size(font_path, font_size)
+        text_width = text_width_with_spacing(font, text, spacing)
+    except Exception:
+        text_width = len(str(text)) * font_size
+    width = text_width + padding_x * 2
+    height = font_size * 1.18 + padding_y * 2
+    left = int(round(center_x - width / 2))
+    top = int(round(center_y - height / 2))
+    path = ass_rounded_rect_path(width, height, radius)
+    return batch.ass_dialogue(
+        3,
+        0,
+        title_end,
+        style,
+        f"{{\\an7\\pos({left},{top})\\p1}}{path}",
+    )
 
 
 def volume_percent_to_gain(settings, key, default_percent):
@@ -2008,7 +2123,10 @@ def replace_opening_visual(input_path, opening_video, output_path, replace_secon
 
 
 def apply_settings(settings, bundle):
-    title_font = Path(require(settings.get("titleFontPath"), "标题字体文件"))
+    title_font = configured_font_path(settings, "titleFontPath", "titleTopFontPath", "标题字体文件")
+    title_top_font = configured_font_path(settings, "titleTopFontPath", "titleFontPath", "标题上行字体文件")
+    title_middle_font = configured_font_path(settings, "titleMiddleFontPath", "titleFontPath", "标题中行字体文件")
+    title_bottom_font = configured_font_path(settings, "titleBottomFontPath", "titleFontPath", "标题下行字体文件")
     caption_font = Path(require(settings.get("captionFontPath"), "字幕字体文件"))
     text_effect_font = Path(settings.get("textEffectFontPath") or caption_font)
     disclaimer_font = Path(settings.get("disclaimerFontPath") or caption_font)
@@ -2022,6 +2140,12 @@ def apply_settings(settings, bundle):
         output_dir = output_dir / output_subdir
     if not title_font.exists():
         raise SystemExit(f"标题字体不存在：{title_font}")
+    if not title_top_font.exists():
+        raise SystemExit(f"标题上行字体不存在：{title_top_font}")
+    if not title_middle_font.exists():
+        raise SystemExit(f"标题中行字体不存在：{title_middle_font}")
+    if not title_bottom_font.exists():
+        raise SystemExit(f"标题下行字体不存在：{title_bottom_font}")
     if not caption_font.exists():
         raise SystemExit(f"字幕字体不存在：{caption_font}")
     if not text_effect_font.exists():
@@ -2042,27 +2166,28 @@ def apply_settings(settings, bundle):
     os.environ["CHANJING_APP_ID"] = require(settings.get("chanjingAppId"), "蝉镜 AK / App ID")
     os.environ["CHANJING_SECRET_KEY"] = require(settings.get("chanjingSecretKey"), "蝉镜 SK / Secret Key")
 
-    batch.TITLE_FONT_PATH = title_font
+    batch.TITLE_FONT_PATH = title_top_font
     batch.CAPTION_FONT_PATH = caption_font
     batch.DISCLAIMER_FONT_PATH = disclaimer_font
     batch.FONT_PATH = caption_font
-    batch.TITLE_ASS_FONT_FAMILY = ass_family_for_path(title_font, batch.TITLE_FONT_FAMILY)
+    batch.TITLE_ASS_FONT_FAMILY = ass_family_for_path(title_top_font, batch.TITLE_FONT_FAMILY)
+    batch.TITLE_TOP_ASS_FONT_FAMILY = ass_family_for_path(title_top_font, batch.TITLE_FONT_FAMILY)
+    batch.TITLE_MIDDLE_ASS_FONT_FAMILY = ass_family_for_path(title_middle_font, batch.TITLE_FONT_FAMILY)
+    batch.TITLE_BOTTOM_ASS_FONT_FAMILY = ass_family_for_path(title_bottom_font, batch.TITLE_FONT_FAMILY)
     batch.CAPTION_ASS_FONT_FAMILY = ass_family_for_path(caption_font, batch.CAPTION_FONT_FAMILY)
     batch.DISCLAIMER_ASS_FONT_FAMILY = ass_family_for_path(disclaimer_font, batch.DISCLAIMER_FONT_FAMILY)
     if disclaimer_font != caption_font:
         batch.CAPTION_FONT_PATH = caption_font
     batch.create_font_asset(required_roles=("caption", "title"))
-    for extra_font in (text_effect_font, disclaimer_font):
-        for target_dir in (batch.FONT_DIR, batch.REMOTION_PUBLIC_DIR):
-            target_dir.mkdir(parents=True, exist_ok=True)
-            target_path = target_dir / extra_font.name
-            if target_path.resolve() != extra_font.resolve():
-                shutil.copy2(extra_font, target_path)
+    copy_extra_font_assets((title_middle_font, title_bottom_font, text_effect_font, disclaimer_font))
 
     output_dir.mkdir(parents=True, exist_ok=True)
     batch.GENERATED_DIR.mkdir(parents=True, exist_ok=True)
     return {
         "title_font": title_font,
+        "title_top_font": title_top_font,
+        "title_middle_font": title_middle_font,
+        "title_bottom_font": title_bottom_font,
         "caption_font": caption_font,
         "text_effect_font": text_effect_font,
         "disclaimer_font": disclaimer_font,
@@ -2118,7 +2243,48 @@ def extract_json(text):
     return parsed
 
 
-def auto_caption_pages(caption_units):
+def caption_single_line(settings):
+    return bool_setting((settings or {}).get("captionSingleLine"))
+
+
+def caption_letter_spacing(settings):
+    return style_spacing(settings or {}, "captionLetterSpacing", 0)
+
+
+def caption_fits_for_settings(text, settings):
+    line = batch.display_line(text)
+    if not line:
+        return True
+    spacing = caption_letter_spacing(settings)
+    if spacing == 0:
+        return batch.caption_fits(line)
+    try:
+        font = batch.font_for_size(batch.CAPTION_FONT_SIZE, "caption")
+        return text_width_with_spacing(font, line, spacing) <= batch.SAFE_TEXT_WIDTH
+    except Exception:
+        return batch.caption_fits(line)
+
+
+def auto_caption_pages(caption_units, settings=None):
+    if caption_single_line(settings):
+        pages = []
+        cursor = 0
+        while cursor < len(caption_units):
+            best = None
+            max_end = min(len(caption_units) - 1, cursor + 5)
+            for end in range(max_end, cursor - 1, -1):
+                line = batch.display_line("".join(caption_units[i]["text"] for i in range(cursor, end + 1)))
+                if line and caption_fits_for_settings(line, settings):
+                    best = (end, line)
+                    break
+            if not best:
+                line = batch.display_line(caption_units[cursor]["text"])
+                best = (cursor, line)
+            end, line = best
+            pages.append({"start": cursor, "end": end, "lines": [line] if line else []})
+            cursor = end + 1
+        return pages
+
     pages = []
     cursor = 0
     for group in batch.build_caption_pages(caption_units):
@@ -2130,8 +2296,9 @@ def auto_caption_pages(caption_units):
     return pages
 
 
-def validate_pages(pages, caption_units):
+def validate_pages(pages, caption_units, settings=None):
     issues = []
+    max_lines = 1 if caption_single_line(settings) else 2
     if not isinstance(pages, list):
         return ["模型返回不是数组"], []
     covered = []
@@ -2155,15 +2322,15 @@ def validate_pages(pages, caption_units):
             issues.append(f"第 {page_index} 页 lines 不是数组")
             continue
         lines = [batch.display_line(str(line)) for line in raw_lines if batch.display_line(str(line))]
-        if not lines or len(lines) > 2:
-            issues.append(f"第 {page_index} 页必须是 1-2 行")
+        if not lines or len(lines) > max_lines:
+            issues.append(f"第 {page_index} 页必须是 1 行" if max_lines == 1 else f"第 {page_index} 页必须是 1-2 行")
             continue
         expected = batch.display_line("".join(caption_units[i]["text"] for i in range(start, end + 1)))
         actual = batch.display_line("".join(lines))
         if actual != expected:
             issues.append(f"第 {page_index} 页改字或漏字：期望 {expected}，实际 {actual}")
         for line in lines:
-            if not batch.caption_fits(line):
+            if not caption_fits_for_settings(line, settings):
                 issues.append(f"第 {page_index} 页单行超宽：{line}")
         for issue in batch.caption_line_issues(lines):
             if "超宽" not in issue:
@@ -2181,41 +2348,43 @@ def validate_pages(pages, caption_units):
     return issues, normalized
 
 
-def valid_lines_for_text(text):
+def valid_lines_for_text(text, settings=None):
     expected = batch.display_line(text)
     if not expected:
         return []
 
     candidates = []
-    if batch.caption_fits(expected):
+    if caption_fits_for_settings(expected, settings):
         candidates.append([expected])
 
-    readable = batch.split_by_readability(expected)
-    if readable:
-        candidates.append(readable)
+    if not caption_single_line(settings):
+        readable = batch.split_by_readability(expected)
+        if readable:
+            candidates.append(readable)
 
-    width_chunks = batch.chunk_by_caption_width(expected)
-    if 1 <= len(width_chunks) <= 2:
-        candidates.append(width_chunks)
+        width_chunks = batch.chunk_by_caption_width(expected)
+        if 1 <= len(width_chunks) <= 2:
+            candidates.append(width_chunks)
 
-    tokens = batch.protected_tokens(expected)
-    for split in range(1, len(tokens)):
-        left = "".join(tokens[:split]).strip("，,；;：: ")
-        right = "".join(tokens[split:]).strip("，,；;：: ")
-        if left and right:
-            candidates.append([left, right])
+        tokens = batch.protected_tokens(expected)
+        for split in range(1, len(tokens)):
+            left = "".join(tokens[:split]).strip("，,；;：: ")
+            right = "".join(tokens[split:]).strip("，,；;：: ")
+            if left and right:
+                candidates.append([left, right])
 
     ranked = []
     seen = set()
     for lines in candidates:
         normalized = [batch.display_line(line) for line in lines if batch.display_line(line)]
         key = tuple(normalized)
-        if key in seen or not (1 <= len(normalized) <= 2):
+        max_lines = 1 if caption_single_line(settings) else 2
+        if key in seen or not (1 <= len(normalized) <= max_lines):
             continue
         seen.add(key)
         if "".join(normalized) != expected:
             continue
-        if not all(batch.caption_fits(line) for line in normalized):
+        if not all(caption_fits_for_settings(line, settings) for line in normalized):
             continue
         readability_issues = [issue for issue in batch.caption_line_issues(normalized) if "超宽" not in issue]
         if readability_issues:
@@ -2231,7 +2400,7 @@ def valid_lines_for_text(text):
     return min(ranked, key=lambda item: item[0])[1]
 
 
-def repair_caption_pages(caption_units):
+def repair_caption_pages(caption_units, settings=None):
     repaired = []
     cursor = 0
     while cursor < len(caption_units):
@@ -2239,7 +2408,7 @@ def repair_caption_pages(caption_units):
         max_end = min(len(caption_units) - 1, cursor + 5)
         for end in range(max_end, cursor - 1, -1):
             text = "".join(caption_units[i]["text"] for i in range(cursor, end + 1))
-            lines = valid_lines_for_text(text)
+            lines = valid_lines_for_text(text, settings)
             if lines:
                 best = (end, lines)
                 break
@@ -2496,7 +2665,7 @@ def supervise_caption_breaks(settings, item):
     caption_units = subtitle_units(units, settings)
     if not caption_units:
         return []
-    initial_pages = auto_caption_pages(caption_units)
+    initial_pages = auto_caption_pages(caption_units, settings)
     unit_payload = [
         {
             "index": index,
@@ -2522,6 +2691,10 @@ def supervise_caption_breaks(settings, item):
         "caption_units": unit_payload,
         "current_pages": initial_pages,
     }
+    if caption_single_line(settings):
+        prompt["rules"][1] = "每个元素格式为 {\"start\":数字,\"end\":数字,\"lines\":[\"单行字幕\"]}。"
+        prompt["rules"][3] = "单行字幕已开启：每页只能有一行 lines，不能输出第二行；如果太长就拆成相邻两页。"
+        prompt["rules"][5] = "单行尽量 7-10 个中文字符，最长不要超过 12 个中文字符；遇到长句必须拆成相邻单行字幕页。"
     if hide_cta_captions(settings):
         prompt["rules"][-1] = "CTA 已按剪辑配置隐藏，给定字幕单元里不包含 CTA；不要自行补回评论区、留下需要、后台来找我等 CTA 字幕。"
     messages = [
@@ -2536,7 +2709,7 @@ def supervise_caption_breaks(settings, item):
         content = chat_completion(settings, messages)
         try:
             pages = extract_json(content)
-            issues, normalized = validate_pages(pages, caption_units)
+            issues, normalized = validate_pages(pages, caption_units, settings)
         except Exception as exc:
             issues, normalized = [f"JSON 解析失败：{exc}"], []
         if not issues:
@@ -2544,18 +2717,23 @@ def supervise_caption_breaks(settings, item):
             return normalized
         last_issues = issues
         messages.append({"role": "assistant", "content": content})
+        overflow_instruction = (
+            "如果问题里有“单行超宽”，必须把这一页拆成前后相邻的单行字幕页；不能拆成两行，也不能再次输出同样的长行。"
+            if caption_single_line(settings)
+            else "如果问题里有“单行超宽”，必须把那一行拆成两行，或者把这一页拆成前后相邻两页；不能再次输出同样的长行。"
+        )
         messages.append({
             "role": "user",
             "content": (
                 "上一次返回不合格，请只返回修正后的 JSON。\n"
-                "如果问题里有“单行超宽”，必须把那一行拆成两行，或者把这一页拆成前后相邻两页；不能再次输出同样的长行。\n"
+                f"{overflow_instruction}\n"
                 "修正后仍然不能改字、漏字、加标点，每行结尾也不能带标点。\n"
                 "问题：\n" + "\n".join(issues)
             ),
         })
-    repaired = repair_caption_pages(caption_units)
+    repaired = repair_caption_pages(caption_units, settings)
     if repaired:
-        repair_issues, normalized = validate_pages(repaired, caption_units)
+        repair_issues, normalized = validate_pages(repaired, caption_units, settings)
         if not repair_issues:
             log_json(
                 "caption_review_repaired",
@@ -2586,10 +2764,25 @@ def write_reviewed_subtitles(item, timed_units, hook, pages, duration, ass_path,
     title_base_size = int(round(bounded_number(title_box["h"] * 0.30, 144, 72, 180)))
     caption_size = int(round(bounded_number(caption_box["h"] * 0.44, batch.CAPTION_FONT_SIZE, 48, 128)))
     disclaimer_size = int(round(bounded_number(disclaimer_box["h"] * 0.29, 43, 24, 64)))
-    red_size = batch.fit_font_size([red], title_base_size, batch.TITLE_MIN_FONT_SIZE, role="title")
-    yellow_size = batch.fit_font_size([yellow], title_base_size, batch.TITLE_MIN_FONT_SIZE, role="title")
-    blue_size = batch.fit_font_size([blue], int(round(title_base_size * 0.92)), batch.TITLE_MIN_FONT_SIZE, role="title")
+    title_font_fallback = settings.get("titleFontPath") or settings.get("titleTopFontPath")
+    title_top_font = Path(settings.get("titleTopFontPath") or title_font_fallback)
+    title_middle_font = Path(settings.get("titleMiddleFontPath") or title_font_fallback)
+    title_bottom_font = Path(settings.get("titleBottomFontPath") or title_font_fallback)
+    title_top_family = getattr(batch, "TITLE_TOP_ASS_FONT_FAMILY", batch.TITLE_ASS_FONT_FAMILY)
+    title_middle_family = getattr(batch, "TITLE_MIDDLE_ASS_FONT_FAMILY", batch.TITLE_ASS_FONT_FAMILY)
+    title_bottom_family = getattr(batch, "TITLE_BOTTOM_ASS_FONT_FAMILY", batch.TITLE_ASS_FONT_FAMILY)
+    title_top_spacing = style_spacing(settings, "titleTopLetterSpacing", 0)
+    title_middle_spacing = style_spacing(settings, "titleMiddleLetterSpacing", 0)
+    title_bottom_spacing = style_spacing(settings, "titleBottomLetterSpacing", 0)
+    title_line_spacing = int(round(bounded_number(settings.get("titleLineSpacing"), title_box["h"] * 0.33, 60, 420)))
+    title_middle_y = title_line_y(title_box, 0.49)
+    title_top_y = title_middle_y - title_line_spacing
+    title_bottom_y = title_middle_y + title_line_spacing
+    red_size = fit_font_size_for_path([red], title_top_font, title_base_size, batch.TITLE_MIN_FONT_SIZE, spacing=title_top_spacing)
+    yellow_size = fit_font_size_for_path([yellow], title_middle_font, title_base_size, batch.TITLE_MIN_FONT_SIZE, spacing=title_middle_spacing)
+    blue_size = fit_font_size_for_path([blue], title_bottom_font, int(round(title_base_size * 0.92)), batch.TITLE_MIN_FONT_SIZE, spacing=title_bottom_spacing)
     disclaimer_opacity = bounded_number(settings.get("disclaimerOpacityPercent"), 50, 0, 100)
+    caption_spacing = style_spacing(settings, "captionLetterSpacing", 0)
 
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -2599,11 +2792,14 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Caption,{batch.CAPTION_ASS_FONT_FAMILY},{caption_size},{ass_color(settings.get("captionColor"), "#ffffff")},&H000000FF,{ass_color(settings.get("captionOutlineColor"), "#000000")},&H00000000,1,0,0,0,100,100,0,0,1,{style_outline(settings, "captionOutlineSize", 8)},0,5,40,40,40,1
+Style: Caption,{batch.CAPTION_ASS_FONT_FAMILY},{caption_size},{ass_color(settings.get("captionColor"), "#ffffff")},&H000000FF,{ass_color(settings.get("captionOutlineColor"), "#000000")},&H00000000,1,0,0,0,100,100,{caption_spacing},0,1,{style_outline(settings, "captionOutlineSize", 8)},0,5,40,40,40,1
 Style: Disclaimer,{batch.DISCLAIMER_ASS_FONT_FAMILY},{disclaimer_size},{ass_color(settings.get("disclaimerColor"), "#ffffff", disclaimer_opacity)},&H000000FF,{ass_color(settings.get("disclaimerOutlineColor"), "#000000")},&H00000000,1,0,0,0,100,100,0,0,1,{style_outline(settings, "disclaimerOutlineSize", 0)},0,5,30,30,30,1
-Style: TitleRed,{batch.TITLE_ASS_FONT_FAMILY},{title_base_size},{ass_color(settings.get("titleTopColor"), "#ffffff")},&H000000FF,{ass_color(settings.get("titleTopOutlineColor"), "#000000")},&H00000000,1,0,0,0,100,100,0,0,1,{style_outline(settings, "titleTopOutlineSize", 8)},0,5,20,20,20,1
-Style: TitleYellow,{batch.TITLE_ASS_FONT_FAMILY},{title_base_size},{ass_color(settings.get("titleMiddleColor"), "#ffde00")},&H000000FF,{ass_color(settings.get("titleMiddleOutlineColor"), "#000000")},&H00000000,1,0,0,0,100,100,0,0,1,{style_outline(settings, "titleMiddleOutlineSize", 8)},0,5,20,20,20,1
-Style: TitleBlue,{batch.TITLE_ASS_FONT_FAMILY},{int(round(title_base_size * 0.92))},{ass_color(settings.get("titleBottomColor"), "#ff2a00")},&H000000FF,{ass_color(settings.get("titleBottomOutlineColor"), "#ffffff")},&H00000000,1,0,0,0,100,100,0,0,1,{style_outline(settings, "titleBottomOutlineSize", 8)},0,5,20,20,20,1
+Style: TitleTopBg,Arial,1,{ass_color(settings.get("titleTopBgColor"), "#000000", settings.get("titleTopBgOpacityPercent", 85))},&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+Style: TitleMiddleBg,Arial,1,{ass_color(settings.get("titleMiddleBgColor"), "#000000", settings.get("titleMiddleBgOpacityPercent", 85))},&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+Style: TitleBottomBg,Arial,1,{ass_color(settings.get("titleBottomBgColor"), "#000000", settings.get("titleBottomBgOpacityPercent", 85))},&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+Style: TitleRed,{title_top_family},{title_base_size},{ass_color(settings.get("titleTopColor"), "#ffffff")},&H000000FF,{ass_color(settings.get("titleTopOutlineColor"), "#000000")},&H00000000,1,0,0,0,100,100,{title_top_spacing},0,1,{style_outline(settings, "titleTopOutlineSize", 8)},0,5,20,20,20,1
+Style: TitleYellow,{title_middle_family},{title_base_size},{ass_color(settings.get("titleMiddleColor"), "#ffde00")},&H000000FF,{ass_color(settings.get("titleMiddleOutlineColor"), "#000000")},&H00000000,1,0,0,0,100,100,{title_middle_spacing},0,1,{style_outline(settings, "titleMiddleOutlineSize", 8)},0,5,20,20,20,1
+Style: TitleBlue,{title_bottom_family},{int(round(title_base_size * 0.92))},{ass_color(settings.get("titleBottomColor"), "#ff2a00")},&H000000FF,{ass_color(settings.get("titleBottomOutlineColor"), "#ffffff")},&H00000000,1,0,0,0,100,100,{title_bottom_spacing},0,1,{style_outline(settings, "titleBottomOutlineSize", 8)},0,5,20,20,20,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -2617,9 +2813,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         f"{{\\pos({disclaimer_x},{disclaimer_y})\\fs{disclaimer_size}}}{batch.ass_escape(batch.display_text(batch.DISCLAIMER))}",
     ))
     if show_title:
-        lines.append(batch.ass_dialogue(4, 0, title_end, "TitleRed", f"{{\\pos({title_center_x},{title_line_y(title_box, 0.16)})\\fs{red_size}}}{batch.ass_escape(red)}"))
-        lines.append(batch.ass_dialogue(4, 0, title_end, "TitleYellow", f"{{\\pos({title_center_x},{title_line_y(title_box, 0.49)})\\fs{yellow_size}}}{batch.ass_escape(yellow)}"))
-        lines.append(batch.ass_dialogue(4, 0, title_end, "TitleBlue", f"{{\\pos({title_center_x},{title_line_y(title_box, 0.82)})\\fs{blue_size}}}{batch.ass_escape(blue)}"))
+        for bg_line in (
+            title_background_dialogue("TitleTopBg", red, title_top_font, red_size, title_top_spacing, title_center_x, title_top_y, settings, title_end, "titleTopBgEnabled"),
+            title_background_dialogue("TitleMiddleBg", yellow, title_middle_font, yellow_size, title_middle_spacing, title_center_x, title_middle_y, settings, title_end, "titleMiddleBgEnabled"),
+            title_background_dialogue("TitleBottomBg", blue, title_bottom_font, blue_size, title_bottom_spacing, title_center_x, title_bottom_y, settings, title_end, "titleBottomBgEnabled"),
+        ):
+            if bg_line:
+                lines.append(bg_line)
+        lines.append(batch.ass_dialogue(4, 0, title_end, "TitleRed", f"{{\\pos({title_center_x},{title_top_y})\\fs{red_size}}}{batch.ass_escape(red)}"))
+        lines.append(batch.ass_dialogue(4, 0, title_end, "TitleYellow", f"{{\\pos({title_center_x},{title_middle_y})\\fs{yellow_size}}}{batch.ass_escape(yellow)}"))
+        lines.append(batch.ass_dialogue(4, 0, title_end, "TitleBlue", f"{{\\pos({title_center_x},{title_bottom_y})\\fs{blue_size}}}{batch.ass_escape(blue)}"))
 
     caption_units = subtitle_units(timed_units, settings)
     srt_blocks = []

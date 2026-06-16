@@ -1066,6 +1066,82 @@ th {
   font-size: 17px;
 }
 
+.title-font-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.title-spacing-grid,
+.caption-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.caption-rule-grid {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.caption-single-line-check {
+  min-height: 64px;
+  align-items: center;
+}
+
+.title-background-panel {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.title-background-panel[open] {
+  display: grid;
+  gap: 10px;
+}
+
+.title-background-panel summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 900;
+  user-select: none;
+}
+
+.title-background-panel summary::marker {
+  color: var(--muted);
+}
+
+.title-bg-grid {
+  display: grid;
+  grid-template-columns: 36px 72px minmax(0, 1fr) 92px;
+  gap: 8px;
+  align-items: end;
+}
+
+.title-bg-shape-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.title-bg-grid .style-head {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.title-bg-grid label {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  font-weight: 700;
+}
+
+.title-bg-enable {
+  min-height: 40px;
+}
+
 .style-settings-grid .settings-card h3 {
   font-size: 19px;
   font-weight: 900;
@@ -1145,6 +1221,8 @@ th {
   justify-content: center;
   align-self: start;
   min-width: 0;
+  position: sticky;
+  top: 0;
   padding: 16px;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -1154,7 +1232,7 @@ th {
 
 .preview-frame {
   position: relative;
-  width: min(390px, 100%);
+  width: var(--preview-frame-width, min(390px, 100%));
   aspect-ratio: 9 / 16;
   overflow: hidden;
   background: #262b34;
@@ -1210,7 +1288,7 @@ th {
 }
 
 .preview-title-box {
-  align-content: space-between;
+  display: block;
 }
 
 .preview-title-line,
@@ -1227,6 +1305,27 @@ th {
 #previewCaptionText,
 #previewTextEffectText,
 #previewDisclaimerText {
+  white-space: nowrap;
+}
+
+.preview-title-line {
+  position: absolute;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-50%);
+}
+
+.preview-title-text {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  line-height: 1.18;
   white-space: nowrap;
 }
 

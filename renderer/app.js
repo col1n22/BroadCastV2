@@ -20,6 +20,26 @@ const fields = [
   'modelName',
   'fontLibrary',
   'titleFontPath',
+  'titleTopFontPath',
+  'titleMiddleFontPath',
+  'titleBottomFontPath',
+  'titleTopLetterSpacing',
+  'titleMiddleLetterSpacing',
+  'titleBottomLetterSpacing',
+  'titleLineSpacing',
+  'titleBackgroundEnabled',
+  'titleTopBgEnabled',
+  'titleTopBgColor',
+  'titleTopBgOpacityPercent',
+  'titleMiddleBgEnabled',
+  'titleMiddleBgColor',
+  'titleMiddleBgOpacityPercent',
+  'titleBottomBgEnabled',
+  'titleBottomBgColor',
+  'titleBottomBgOpacityPercent',
+  'titleBgPaddingX',
+  'titleBgPaddingY',
+  'titleBgRadius',
   'captionFontPath',
   'textEffectFontPath',
   'disclaimerFontPath',
@@ -81,6 +101,8 @@ const fields = [
   'captionColor',
   'captionOutlineColor',
   'captionOutlineSize',
+  'captionLetterSpacing',
+  'captionSingleLine',
   'captionBufferSeconds',
   'trimSilenceEnabled',
   'silenceMinSeconds',
@@ -150,6 +172,7 @@ let templateManagerAccountIndex = 1;
 let templateManagerDraftConfigs = new Map();
 let templateManagerDraftAccounts = [];
 let templateManagerFilterAccountIndexes = new Set();
+let previewLayoutFrame = 0;
 
 const requiredClipFields = new Set(['clipTitle', 'clipCaption', 'clipBgm']);
 const optionalClipFields = ['hideCtaCaptions', 'clipTitleMotion', 'clipIntro', 'clipPatent', 'clipPip', 'clipTextEffects', 'clipLogo'];
@@ -200,6 +223,26 @@ const queueStatusLabels = {
 };
 const templateFields = [
   'titleFontPath',
+  'titleTopFontPath',
+  'titleMiddleFontPath',
+  'titleBottomFontPath',
+  'titleTopLetterSpacing',
+  'titleMiddleLetterSpacing',
+  'titleBottomLetterSpacing',
+  'titleLineSpacing',
+  'titleBackgroundEnabled',
+  'titleTopBgEnabled',
+  'titleTopBgColor',
+  'titleTopBgOpacityPercent',
+  'titleMiddleBgEnabled',
+  'titleMiddleBgColor',
+  'titleMiddleBgOpacityPercent',
+  'titleBottomBgEnabled',
+  'titleBottomBgColor',
+  'titleBottomBgOpacityPercent',
+  'titleBgPaddingX',
+  'titleBgPaddingY',
+  'titleBgRadius',
   'captionFontPath',
   'textEffectFontPath',
   'disclaimerFontPath',
@@ -215,6 +258,8 @@ const templateFields = [
   'captionColor',
   'captionOutlineColor',
   'captionOutlineSize',
+  'captionLetterSpacing',
+  'captionSingleLine',
   'captionBufferSeconds',
   'disclaimerColor',
   'disclaimerOutlineColor',
@@ -1344,6 +1389,42 @@ function syncFontSelectControls(targetId = '') {
   renderFontSelectOptions(targetId);
 }
 
+function normalizeTitleLineFontSettings(target = settings) {
+  const fallback = String(target.titleFontPath || target.titleTopFontPath || target.titleMiddleFontPath || target.titleBottomFontPath || '').trim();
+  target.titleFontPath = fallback;
+  target.titleTopFontPath = String(target.titleTopFontPath || fallback).trim();
+  target.titleMiddleFontPath = String(target.titleMiddleFontPath || fallback).trim();
+  target.titleBottomFontPath = String(target.titleBottomFontPath || fallback).trim();
+  return target;
+}
+
+function settingBoolean(value, fallback = false) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const text = String(value).trim().toLowerCase();
+  if (['false', '0', 'no', 'off', '关闭'].includes(text)) return false;
+  if (['true', '1', 'yes', 'on', '开启'].includes(text)) return true;
+  return Boolean(value);
+}
+
+function normalizeTitleBackgroundSettings(target = settings) {
+  const rowKeys = ['titleTopBgEnabled', 'titleMiddleBgEnabled', 'titleBottomBgEnabled'];
+  const hasRowSetting = rowKeys.some((key) => Object.prototype.hasOwnProperty.call(target, key));
+  if (!hasRowSetting && target.titleBackgroundEnabled !== undefined) {
+    const legacyEnabled = settingBoolean(target.titleBackgroundEnabled);
+    rowKeys.forEach((key) => {
+      target[key] = legacyEnabled;
+    });
+  } else {
+    rowKeys.forEach((key) => {
+      target[key] = settingBoolean(target[key]);
+    });
+  }
+  target.titleBackgroundEnabled = rowKeys.some((key) => settingBoolean(target[key]));
+  return target;
+}
+
 async function importFontsToLibrary() {
   const selected = await window.huApp.chooseFile({
     multiSelections: true,
@@ -1403,6 +1484,8 @@ function stashCurrentTemplate(accountIndex = settings.chanjingAccountIndex, temp
 
 function collectSettings() {
   const next = collectSettingsBase();
+  normalizeTitleLineFontSettings(next);
+  normalizeTitleBackgroundSettings(next);
   next.chanjingAccounts = normalizeAccounts(settings.chanjingAccounts);
   next.chanjingAssetOverrides = normalizeAssetOverrides(settings.chanjingAssetOverrides);
   next.accountTemplates = normalizeAccountTemplates(settings.accountTemplates);
@@ -1490,6 +1573,8 @@ function fillSettings(value) {
   }
   settings.assetSelectionMode = normalizeAssetSelectionMode(settings.assetSelectionMode);
   settings.accountAssetTemplates = normalizeTemplateMap(settings.accountAssetTemplates);
+  normalizeTitleLineFontSettings(settings);
+  normalizeTitleBackgroundSettings(settings);
   if (!defaultTemplateSnapshot) {
     defaultTemplateSnapshot = captureTemplate(settings);
   }
@@ -1502,10 +1587,14 @@ function fillSettings(value) {
         ...settings,
         ...templateForSelection(settings.chanjingAccountIndex, settings.currentTemplateId)
       };
+      normalizeTitleLineFontSettings(settings);
+      normalizeTitleBackgroundSettings(settings);
     } else {
       settings.chanjingAssetIndex = 0;
     }
   }
+  normalizeTitleLineFontSettings(settings);
+  normalizeTitleBackgroundSettings(settings);
   if (!settings.logoFile) {
     settings.logoFile = defaultLogoFilePath(settings.bundlePath);
   }
@@ -1726,21 +1815,83 @@ function previewScale() {
   return Math.max(0.05, width / previewCanvas.width);
 }
 
+function fitPreviewFrameToViewport() {
+  const frame = $('previewFrame');
+  const card = frame?.closest('.preview-stage-card');
+  if (!frame || !card) return;
+  const cardRect = card.getBoundingClientRect();
+  const cardStyle = window.getComputedStyle(card);
+  const paddingX = Number.parseFloat(cardStyle.paddingLeft || '0') + Number.parseFloat(cardStyle.paddingRight || '0');
+  const paddingY = Number.parseFloat(cardStyle.paddingTop || '0') + Number.parseFloat(cardStyle.paddingBottom || '0');
+  const scrollRect = card.closest('.preview-scroll')?.getBoundingClientRect();
+  const viewportBottom = scrollRect ? Math.min(window.innerHeight, scrollRect.bottom) : window.innerHeight;
+  const availableWidth = Math.max(96, card.clientWidth - paddingX);
+  const availableHeight = Math.max(96, viewportBottom - cardRect.top - paddingY - 12);
+  const fittedWidth = Math.floor(Math.min(390, availableWidth, availableHeight * previewCanvas.width / previewCanvas.height));
+  frame.style.setProperty('--preview-frame-width', `${Math.max(96, fittedWidth)}px`);
+}
+
 function schedulePreviewLayoutUpdate() {
-  window.requestAnimationFrame(() => {
+  if (previewLayoutFrame) {
+    window.cancelAnimationFrame(previewLayoutFrame);
+  }
+  previewLayoutFrame = window.requestAnimationFrame(() => {
+    previewLayoutFrame = 0;
     updatePreviewLayout();
+    window.setTimeout(updatePreviewLayout, 80);
   });
 }
 
 function previewTextFont(kind, size) {
-  const family = kind === 'title'
-    ? 'PreviewTitleFont, "Microsoft YaHei UI", sans-serif'
-    : kind === 'textEffect'
+  const family = kind === 'title' || kind === 'titleTop'
+    ? 'PreviewTitleTopFont, "Microsoft YaHei UI", sans-serif'
+    : kind === 'titleMiddle'
+      ? 'PreviewTitleMiddleFont, "Microsoft YaHei UI", sans-serif'
+      : kind === 'titleBottom'
+        ? 'PreviewTitleBottomFont, "Microsoft YaHei UI", sans-serif'
+        : kind === 'textEffect'
       ? 'PreviewTextEffectFont, "Microsoft YaHei UI", sans-serif'
       : kind === 'disclaimer'
         ? 'PreviewDisclaimerFont, "Microsoft YaHei UI", sans-serif'
         : 'PreviewCaptionFont, "Microsoft YaHei UI", sans-serif';
   return `900 ${Math.max(1, Math.round(size))}px ${family}`;
+}
+
+function previewSpacingValue(key, fallback = 0) {
+  const value = Number($(key)?.value ?? settings[key] ?? fallback);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function previewBooleanValue(key, fallback = false) {
+  const el = $(key);
+  if (el?.type === 'checkbox') return Boolean(el.checked);
+  return settingBoolean(settings[key], fallback);
+}
+
+function previewColorValue(key, fallback = '#000000') {
+  return String($(key)?.value || settings[key] || fallback);
+}
+
+function previewRgbaColor(hexValue, opacityPercent = 100) {
+  let text = String(hexValue || '#000000').trim();
+  if (text.startsWith('#')) text = text.slice(1);
+  if (/^[0-9a-fA-F]{3}$/.test(text)) {
+    text = text.split('').map((ch) => ch + ch).join('');
+  }
+  if (!/^[0-9a-fA-F]{6}$/.test(text)) text = '000000';
+  const opacity = clampNumber(Number(opacityPercent ?? 100), 0, 100) / 100;
+  const r = parseInt(text.slice(0, 2), 16);
+  const g = parseInt(text.slice(2, 4), 16);
+  const b = parseInt(text.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+}
+
+function previewLetterSpacingForKind(kind) {
+  if (kind === 'title' || kind === 'titleTop') return previewSpacingValue('titleTopLetterSpacing', 0);
+  if (kind === 'titleMiddle') return previewSpacingValue('titleMiddleLetterSpacing', 0);
+  if (kind === 'titleBottom') return previewSpacingValue('titleBottomLetterSpacing', 0);
+  if (kind === 'caption') return previewSpacingValue('captionLetterSpacing', 0);
+  return 0;
 }
 
 const previewMeasureCanvas = document.createElement('canvas');
@@ -1749,7 +1900,9 @@ const previewMeasureContext = previewMeasureCanvas.getContext('2d');
 function previewTextWidth(text, size, kind) {
   if (!previewMeasureContext) return String(text || '').length * size;
   previewMeasureContext.font = previewTextFont(kind, size);
-  return previewMeasureContext.measureText(String(text || '')).width;
+  const value = String(text || '');
+  const spacing = previewLetterSpacingForKind(kind);
+  return previewMeasureContext.measureText(value).width + Math.max(0, value.length - 1) * spacing;
 }
 
 function fitPreviewAssFontSize(lines, maxSize, minSize, maxWidth, kind) {
@@ -1820,12 +1973,20 @@ function applyPreviewBox(kind, box) {
     const top = el.querySelector('.preview-title-top');
     const middle = el.querySelector('.preview-title-middle');
     const bottom = el.querySelector('.preview-title-bottom');
-    const topSize = fitPreviewAssFontSize([top?.textContent || ''], titleBaseSize, previewTitleMinFontSize, previewSafeTextWidth, 'title');
-    const middleSize = fitPreviewAssFontSize([middle?.textContent || ''], titleBaseSize, previewTitleMinFontSize, previewSafeTextWidth, 'title');
-    const bottomSize = fitPreviewAssFontSize([bottom?.textContent || ''], Math.round(titleBaseSize * 0.92), previewTitleMinFontSize, previewSafeTextWidth, 'title');
+    const topSize = fitPreviewAssFontSize([top?.textContent || ''], titleBaseSize, previewTitleMinFontSize, previewSafeTextWidth, 'titleTop');
+    const middleSize = fitPreviewAssFontSize([middle?.textContent || ''], titleBaseSize, previewTitleMinFontSize, previewSafeTextWidth, 'titleMiddle');
+    const bottomSize = fitPreviewAssFontSize([bottom?.textContent || ''], Math.round(titleBaseSize * 0.92), previewTitleMinFontSize, previewSafeTextWidth, 'titleBottom');
     top.style.fontSize = `${topSize * scale}px`;
     middle.style.fontSize = `${middleSize * scale}px`;
     bottom.style.fontSize = `${bottomSize * scale}px`;
+    top.dataset.previewFontSize = String(topSize);
+    middle.dataset.previewFontSize = String(middleSize);
+    bottom.dataset.previewFontSize = String(bottomSize);
+    const lineSpacing = clampNumber(previewSpacingValue('titleLineSpacing', Math.round(box.h * 0.33)), 60, 420) * scale;
+    const middleY = box.h * 0.49 * scale;
+    top.style.top = `${middleY - lineSpacing}px`;
+    middle.style.top = `${middleY}px`;
+    bottom.style.top = `${middleY + lineSpacing}px`;
   } else if (kind === 'caption') {
     const maxSize = clampNumber(box.h * 0.44, 48, 128);
     const size = fitPreviewBoxFontSize($('previewCaptionText'), box, maxSize, 18, 'caption', 1.22);
@@ -1842,6 +2003,7 @@ function applyPreviewBox(kind, box) {
 }
 
 function updatePreviewLayout() {
+  fitPreviewFrameToViewport();
   for (const kind of Object.keys(previewDefaults)) {
     setPreviewBox(kind, getPreviewBox(kind), false);
   }
@@ -1913,16 +2075,23 @@ function updatePreviewFonts() {
     style.id = 'previewFontStyle';
     document.head.appendChild(style);
   }
-  const titleUrl = fileUrl($('titleFontPath')?.value || settings.titleFontPath);
+  const fallbackTitleFont = $('titleFontPath')?.value || settings.titleFontPath;
+  const titleTopUrl = fileUrl($('titleTopFontPath')?.value || settings.titleTopFontPath || fallbackTitleFont);
+  const titleMiddleUrl = fileUrl($('titleMiddleFontPath')?.value || settings.titleMiddleFontPath || fallbackTitleFont);
+  const titleBottomUrl = fileUrl($('titleBottomFontPath')?.value || settings.titleBottomFontPath || fallbackTitleFont);
   const captionUrl = fileUrl($('captionFontPath')?.value || settings.captionFontPath);
   const textEffectUrl = fileUrl($('textEffectFontPath')?.value || settings.textEffectFontPath || $('captionFontPath')?.value || settings.captionFontPath);
   const disclaimerUrl = fileUrl($('disclaimerFontPath')?.value || settings.disclaimerFontPath || $('captionFontPath')?.value || settings.captionFontPath);
   style.textContent = `
-    ${titleUrl ? `@font-face{font-family:PreviewTitleFont;src:url("${titleUrl}");}` : ''}
+    ${titleTopUrl ? `@font-face{font-family:PreviewTitleTopFont;src:url("${titleTopUrl}");}` : ''}
+    ${titleMiddleUrl ? `@font-face{font-family:PreviewTitleMiddleFont;src:url("${titleMiddleUrl}");}` : ''}
+    ${titleBottomUrl ? `@font-face{font-family:PreviewTitleBottomFont;src:url("${titleBottomUrl}");}` : ''}
     ${captionUrl ? `@font-face{font-family:PreviewCaptionFont;src:url("${captionUrl}");}` : ''}
     ${textEffectUrl ? `@font-face{font-family:PreviewTextEffectFont;src:url("${textEffectUrl}");}` : ''}
     ${disclaimerUrl ? `@font-face{font-family:PreviewDisclaimerFont;src:url("${disclaimerUrl}");}` : ''}
-    .preview-title-box{font-family:PreviewTitleFont,"Microsoft YaHei UI",sans-serif;}
+    .preview-title-top{font-family:PreviewTitleTopFont,"Microsoft YaHei UI",sans-serif;}
+    .preview-title-middle{font-family:PreviewTitleMiddleFont,"Microsoft YaHei UI",sans-serif;}
+    .preview-title-bottom{font-family:PreviewTitleBottomFont,"Microsoft YaHei UI",sans-serif;}
     .preview-caption-box{font-family:PreviewCaptionFont,"Microsoft YaHei UI",sans-serif;}
     .preview-text-effect-box{font-family:PreviewTextEffectFont,"Microsoft YaHei UI",sans-serif;}
     .preview-disclaimer-box{font-family:PreviewDisclaimerFont,"Microsoft YaHei UI",sans-serif;}
@@ -1962,6 +2131,52 @@ function applyPreviewOutline(el, width, color) {
   el.style.textShadow = previewOutlineShadow(width, color);
 }
 
+function previewTitleKindForLine(line) {
+  if (line?.classList?.contains('preview-title-middle')) return 'titleMiddle';
+  if (line?.classList?.contains('preview-title-bottom')) return 'titleBottom';
+  return 'titleTop';
+}
+
+function resetPreviewTitleBackground(line, text, fontSize, scale) {
+  const lineHeight = Math.max(1, fontSize * 1.18 * scale);
+  line.style.height = `${lineHeight}px`;
+  text.style.backgroundColor = 'transparent';
+  text.style.borderRadius = '0';
+  text.style.padding = '0';
+  text.style.width = 'auto';
+  text.style.height = 'auto';
+  text.style.lineHeight = `${lineHeight}px`;
+}
+
+function applyPreviewTitleBackground(line, enabledKey, colorKey, opacityKey) {
+  const text = line?.querySelector('.preview-title-text');
+  if (!text) return;
+  const scale = previewScale();
+  const rawFontSize = Number(line.dataset.previewFontSize || 0) || (Number.parseFloat(window.getComputedStyle(line).fontSize || '0') / scale);
+  const fontSize = Number.isFinite(rawFontSize) && rawFontSize > 0 ? rawFontSize : 96;
+  if (!previewBooleanValue(enabledKey, false)) {
+    resetPreviewTitleBackground(line, text, fontSize, scale);
+    return;
+  }
+  const kind = previewTitleKindForLine(line);
+  const paddingX = previewSpacingValue('titleBgPaddingX', 36) * scale;
+  const paddingY = previewSpacingValue('titleBgPaddingY', 18) * scale;
+  const radius = previewSpacingValue('titleBgRadius', 12) * scale;
+  const textWidth = previewTextWidth(text.textContent || '', fontSize, kind) * scale;
+  const width = Math.max(1, textWidth + paddingX * 2);
+  const height = Math.max(1, fontSize * 1.18 * scale + paddingY * 2);
+  line.style.height = `${height}px`;
+  text.style.backgroundColor = previewRgbaColor(
+    previewColorValue(colorKey, '#000000'),
+    previewSpacingValue(opacityKey, 85)
+  );
+  text.style.borderRadius = `${radius}px`;
+  text.style.padding = '0';
+  text.style.width = `${width}px`;
+  text.style.height = `${height}px`;
+  text.style.lineHeight = `${fontSize * 1.18 * scale}px`;
+}
+
 function applyPreviewTextStyle() {
   const titleTop = $('previewTitleBox')?.querySelector('.preview-title-top');
   const titleMiddle = $('previewTitleBox')?.querySelector('.preview-title-middle');
@@ -1971,18 +2186,25 @@ function applyPreviewTextStyle() {
   const disclaimer = $('previewDisclaimerBox');
   if (titleTop) {
     titleTop.style.color = $('titleTopColor')?.value || settings.titleTopColor || '#ffffff';
+    titleTop.style.letterSpacing = `${previewSpacingValue('titleTopLetterSpacing', 0) * previewScale()}px`;
     applyPreviewOutline(titleTop, $('titleTopOutlineSize')?.value || settings.titleTopOutlineSize, $('titleTopOutlineColor')?.value || settings.titleTopOutlineColor);
+    applyPreviewTitleBackground(titleTop, 'titleTopBgEnabled', 'titleTopBgColor', 'titleTopBgOpacityPercent');
   }
   if (titleMiddle) {
     titleMiddle.style.color = $('titleMiddleColor')?.value || settings.titleMiddleColor || '#ffde00';
+    titleMiddle.style.letterSpacing = `${previewSpacingValue('titleMiddleLetterSpacing', 0) * previewScale()}px`;
     applyPreviewOutline(titleMiddle, $('titleMiddleOutlineSize')?.value || settings.titleMiddleOutlineSize, $('titleMiddleOutlineColor')?.value || settings.titleMiddleOutlineColor);
+    applyPreviewTitleBackground(titleMiddle, 'titleMiddleBgEnabled', 'titleMiddleBgColor', 'titleMiddleBgOpacityPercent');
   }
   if (titleBottom) {
     titleBottom.style.color = $('titleBottomColor')?.value || settings.titleBottomColor || '#ff2a00';
+    titleBottom.style.letterSpacing = `${previewSpacingValue('titleBottomLetterSpacing', 0) * previewScale()}px`;
     applyPreviewOutline(titleBottom, $('titleBottomOutlineSize')?.value || settings.titleBottomOutlineSize, $('titleBottomOutlineColor')?.value || settings.titleBottomOutlineColor);
+    applyPreviewTitleBackground(titleBottom, 'titleBottomBgEnabled', 'titleBottomBgColor', 'titleBottomBgOpacityPercent');
   }
   if (caption) {
     caption.style.color = $('captionColor')?.value || settings.captionColor || '#ffffff';
+    caption.style.letterSpacing = `${previewSpacingValue('captionLetterSpacing', 0) * previewScale()}px`;
     applyPreviewOutline(caption, $('captionOutlineSize')?.value || settings.captionOutlineSize, $('captionOutlineColor')?.value || settings.captionOutlineColor);
   }
   if (textEffect) {
@@ -2032,9 +2254,9 @@ function generatePreviewTitle() {
   const padded = [...lines, '', '', ''];
   const titleBox = $('previewTitleBox');
   if (!titleBox) return;
-  titleBox.querySelector('.preview-title-top').textContent = previewDisplayLine(padded[0]);
-  titleBox.querySelector('.preview-title-middle').textContent = previewDisplayLine(padded[1]);
-  titleBox.querySelector('.preview-title-bottom').textContent = previewDisplayLine(padded[2]);
+  titleBox.querySelector('.preview-title-top .preview-title-text').textContent = previewDisplayLine(padded[0]);
+  titleBox.querySelector('.preview-title-middle .preview-title-text').textContent = previewDisplayLine(padded[1]);
+  titleBox.querySelector('.preview-title-bottom .preview-title-text').textContent = previewDisplayLine(padded[2]);
   schedulePreviewLayoutUpdate();
 }
 
@@ -2054,12 +2276,8 @@ function generatePreviewCaption() {
   const content = contentForItem(item) || '很多糖友一看血糖高，就问是不是药不够。';
   const sentences = splitPreviewSentences(content);
   const sentence = sentences[3] || sentences[0] || content;
-  const parts = sentence
-    .split(/[，,。！？!?；;：:、]+/)
-    .map(cleanPreviewCaptionLine)
-    .filter(Boolean);
-  const lines = parts.length >= 2 ? parts.slice(0, 2) : [cleanPreviewCaptionLine(sentence)];
-  $('previewCaptionText').innerHTML = lines.map(escapeHtml).join('<br />');
+  const line = cleanPreviewCaptionLine(sentence) || '很多糖友一看血糖高就问是不是药不够';
+  $('previewCaptionText').textContent = line;
   schedulePreviewLayoutUpdate();
 }
 
@@ -4524,7 +4742,9 @@ function validateBeforeRun() {
     ['modelBaseUrl', '模型接口 URL'],
     ['modelApiKey', '模型 API Key'],
     ['modelName', '模型名'],
-    ['titleFontPath', '标题字体文件'],
+    ['titleTopFontPath', '标题上行字体文件'],
+    ['titleMiddleFontPath', '标题中行字体文件'],
+    ['titleBottomFontPath', '标题下行字体文件'],
     ['captionFontPath', '字幕字体文件'],
     ['textEffectFontPath', '花字字体文件'],
     ['disclaimerFontPath', '底部声明字体文件']
@@ -4989,7 +5209,11 @@ async function init() {
     settings.templateSourceAssetIndex = Number($('templateSourceAssetIndex').value || 0);
   });
   $('btnAddTemplateFromAsset')?.addEventListener('click', addTemplateFromSelectedAsset);
-  window.addEventListener('resize', updatePreviewLayout);
+  document.querySelector('#section-preview .preview-scroll')?.addEventListener('scroll', schedulePreviewLayoutUpdate);
+  document.querySelectorAll('#section-preview details').forEach((details) => {
+    details.addEventListener('toggle', schedulePreviewLayoutUpdate);
+  });
+  window.addEventListener('resize', schedulePreviewLayoutUpdate);
 
   [
     'titleTopColor',
@@ -5024,6 +5248,9 @@ async function init() {
 
   [
     'titleFontPath',
+    'titleTopFontPath',
+    'titleMiddleFontPath',
+    'titleBottomFontPath',
     'captionFontPath',
     'textEffectFontPath',
     'disclaimerFontPath',

@@ -207,13 +207,13 @@
                   <video id="previewBgVideo" class="preview-bg-media" muted playsinline preload="metadata" hidden></video>
                 </div>
                 <div id="previewTitleBox" class="preview-box preview-title-box" data-preview-box="title">
-                  <div class="preview-title-line preview-title-top">糖尿病血糖高</div>
-                  <div class="preview-title-line preview-title-middle">胰岛要先看</div>
-                  <div class="preview-title-line preview-title-bottom">今天讲明白</div>
+                  <div class="preview-title-line preview-title-top"><span class="preview-title-text">糖尿病血糖高</span></div>
+                  <div class="preview-title-line preview-title-middle"><span class="preview-title-text">胰岛要先看</span></div>
+                  <div class="preview-title-line preview-title-bottom"><span class="preview-title-text">今天讲明白</span></div>
                   <span class="preview-resize-handle"></span>
                 </div>
                 <div id="previewCaptionBox" class="preview-box preview-caption-box" data-preview-box="caption">
-                  <div id="previewCaptionText">很多糖友一看血糖高<br />就问是不是药不够</div>
+                  <div id="previewCaptionText">很多糖友一看血糖高就问是不是药不够</div>
                   <span class="preview-resize-handle"></span>
                 </div>
                 <div id="previewTextEffectBox" class="preview-box preview-text-effect-box" data-preview-box="textEffect">
@@ -289,10 +289,83 @@
 
               <div class="preview-object-style" data-preview-style-panel="title">
                 <h4>标题样式</h4>
-                <div class="field">
-                  <label>标题字体文件</label>
-                  <select data-preview-font-select="titleFontPath"></select>
+                <div class="title-font-grid">
+                  <div class="field">
+                    <label>上行字体</label>
+                    <select data-preview-font-select="titleTopFontPath"></select>
+                  </div>
+                  <div class="field">
+                    <label>中行字体</label>
+                    <select data-preview-font-select="titleMiddleFontPath"></select>
+                  </div>
+                  <div class="field">
+                    <label>下行字体</label>
+                    <select data-preview-font-select="titleBottomFontPath"></select>
+                  </div>
                 </div>
+                <div class="title-spacing-grid">
+                  <div class="field">
+                    <label>上行字间距</label>
+                    <input id="titleTopLetterSpacing" data-preview-style-target="titleTopLetterSpacing" type="number" min="-20" max="80" step="1" />
+                  </div>
+                  <div class="field">
+                    <label>中行字间距</label>
+                    <input id="titleMiddleLetterSpacing" data-preview-style-target="titleMiddleLetterSpacing" type="number" min="-20" max="80" step="1" />
+                  </div>
+                  <div class="field">
+                    <label>下行字间距</label>
+                    <input id="titleBottomLetterSpacing" data-preview-style-target="titleBottomLetterSpacing" type="number" min="-20" max="80" step="1" />
+                  </div>
+                  <div class="field">
+                    <label>标题行间距</label>
+                    <input id="titleLineSpacing" data-preview-style-target="titleLineSpacing" type="number" min="60" max="420" step="1" />
+                  </div>
+                </div>
+                <input id="titleBackgroundEnabled" type="checkbox" hidden />
+                <details class="title-background-panel">
+                  <summary>标题背景</summary>
+                  <div class="title-bg-grid">
+                    <span class="style-head">行</span>
+                    <span class="style-head">开启</span>
+                    <span class="style-head">背景颜色</span>
+                    <span class="style-head">不透明度</span>
+                    <label>上</label>
+                    <label class="inline-check title-bg-enable">
+                      <input id="titleTopBgEnabled" data-preview-style-target="titleTopBgEnabled" type="checkbox" />
+                      <span>开启</span>
+                    </label>
+                    <input id="titleTopBgColor" data-preview-style-target="titleTopBgColor" type="color" />
+                    <input id="titleTopBgOpacityPercent" data-preview-style-target="titleTopBgOpacityPercent" type="number" min="0" max="100" step="1" />
+                    <label>中</label>
+                    <label class="inline-check title-bg-enable">
+                      <input id="titleMiddleBgEnabled" data-preview-style-target="titleMiddleBgEnabled" type="checkbox" />
+                      <span>开启</span>
+                    </label>
+                    <input id="titleMiddleBgColor" data-preview-style-target="titleMiddleBgColor" type="color" />
+                    <input id="titleMiddleBgOpacityPercent" data-preview-style-target="titleMiddleBgOpacityPercent" type="number" min="0" max="100" step="1" />
+                    <label>下</label>
+                    <label class="inline-check title-bg-enable">
+                      <input id="titleBottomBgEnabled" data-preview-style-target="titleBottomBgEnabled" type="checkbox" />
+                      <span>开启</span>
+                    </label>
+                    <input id="titleBottomBgColor" data-preview-style-target="titleBottomBgColor" type="color" />
+                    <input id="titleBottomBgOpacityPercent" data-preview-style-target="titleBottomBgOpacityPercent" type="number" min="0" max="100" step="1" />
+                  </div>
+                  <div class="title-bg-shape-grid">
+                    <div class="field">
+                      <label>横向 padding</label>
+                      <input id="titleBgPaddingX" data-preview-style-target="titleBgPaddingX" type="number" min="0" max="180" step="1" />
+                    </div>
+                    <div class="field">
+                      <label>纵向 padding</label>
+                      <input id="titleBgPaddingY" data-preview-style-target="titleBgPaddingY" type="number" min="0" max="120" step="1" />
+                    </div>
+                    <div class="field">
+                      <label>圆角</label>
+                      <input id="titleBgRadius" data-preview-style-target="titleBgRadius" type="number" min="0" max="120" step="1" />
+                    </div>
+                  </div>
+                </details>
                 <div class="object-style-grid title-style-grid">
                   <span class="style-head">行</span>
                   <span class="style-head">字体颜色</span>
@@ -326,6 +399,16 @@
                   <input data-preview-style-target="captionColor" type="color" />
                   <input data-preview-style-target="captionOutlineColor" type="color" />
                   <input data-preview-style-target="captionOutlineSize" type="number" min="0" max="80" />
+                </div>
+                <div class="caption-rule-grid">
+                  <div class="field">
+                    <label>字幕字间距</label>
+                    <input id="captionLetterSpacing" data-preview-style-target="captionLetterSpacing" type="number" min="-20" max="80" step="1" />
+                  </div>
+                  <label class="inline-check standalone caption-single-line-check">
+                    <input id="captionSingleLine" data-preview-style-target="captionSingleLine" type="checkbox" />
+                    <span>单行字幕</span>
+                  </label>
                 </div>
               </div>
 
@@ -529,6 +612,9 @@
 
           <div class="hidden-template-style-fields" hidden>
             <input id="titleFontPath" />
+            <input id="titleTopFontPath" />
+            <input id="titleMiddleFontPath" />
+            <input id="titleBottomFontPath" />
             <input id="captionFontPath" />
             <input id="textEffectFontPath" />
             <input id="disclaimerFontPath" />
