@@ -264,7 +264,16 @@ def ass_family_for_path(font_path, fallback):
 
 
 def configured_font_path(settings, key, fallback_key=None, label="字体文件"):
-    value = settings.get(key) or (settings.get(fallback_key) if fallback_key else None)
+    fallback_keys = []
+    if isinstance(fallback_key, (list, tuple)):
+        fallback_keys = list(fallback_key)
+    elif fallback_key:
+        fallback_keys = [fallback_key]
+    value = settings.get(key)
+    for fallback in fallback_keys:
+        if value:
+            break
+        value = settings.get(fallback)
     return Path(require(value, label))
 
 
@@ -277,6 +286,48 @@ def copy_extra_font_assets(font_paths):
             target_path = target_dir / extra_font.name
             if target_path.resolve() != extra_font.resolve():
                 shutil.copy2(extra_font, target_path)
+
+
+def install_safe_batch_font_loader():
+    if not batch:
+        return
+
+    def safe_font_for_size(size, role="caption"):
+        return font_for_path_size(batch.font_path_for_role(role), int(size))
+
+    def safe_text_width(text, size, role="caption"):
+        line = batch.display_line(text)
+        if not line:
+            return 0
+        try:
+            font = safe_font_for_size(int(size), role)
+            bbox = font.getbbox(line)
+            return bbox[2] - bbox[0]
+        except Exception as exc:
+            log_json("batch_text_width_fallback", role=role, error=str(exc))
+            return estimated_text_width(line, int(size), 0)
+
+    def safe_caption_fits(text):
+        return safe_text_width(text, batch.CAPTION_FONT_SIZE, "caption") <= batch.SAFE_TEXT_WIDTH
+
+    def safe_fit_font_size(lines, max_size, min_size, max_width=None, role="caption"):
+        visible = [line for line in lines if line]
+        if not visible:
+            return max_size
+        width = max_width or batch.SAFE_TEXT_WIDTH
+        for size in range(int(max_size), int(min_size) - 1, -2):
+            if all(safe_text_width(line, size, role) <= width for line in visible):
+                return int(size)
+        return estimated_fit_font_size(visible, int(max_size), int(min_size), width, 0)
+
+    try:
+        batch.FONT_CACHE.clear()
+    except Exception:
+        pass
+    batch.font_for_size = safe_font_for_size
+    batch.text_width = safe_text_width
+    batch.caption_fits = safe_caption_fits
+    batch.fit_font_size = safe_fit_font_size
 
 
 def normalized_hex_color(value, default):
@@ -325,6 +376,88 @@ def style_spacing(settings, key, default=0):
 
 
 _FONT_SIZE_CACHE = {}
+_PIL_FONT_PATH_CACHE = {}
+
+
+def writable_ascii_dir_candidates(source_path):
+    source = Path(source_path)
+    candidates = []
+    if sys.platform == "win32" and source.drive:
+        candidates.append(Path(source.drive + "\\hu_teacher_font_cache"))
+    program_data = os.environ.get("ProgramData")
+    if program_data:
+        candidates.append(Path(program_data) / "HuTeacherVideo" / "font_cache")
+    candidates.append(Path(tempfile.gettempdir()) / "hu_teacher_font_cache")
+    candidates.append(Path.cwd() / ".font_cache")
+    seen = set()
+    for candidate in candidates:
+        text = str(candidate)
+        if text in seen or not text.isascii():
+            continue
+        seen.add(text)
+        yield candidate
+
+
+def ensure_writable_dir(path):
+    path.mkdir(parents=True, exist_ok=True)
+    probe = path / ".write_test"
+    probe.write_text("ok", encoding="ascii")
+    probe.unlink(missing_ok=True)
+    return path
+
+
+def pillow_safe_font_path(font_path):
+    source = Path(font_path)
+    source_text = str(source)
+    if source_text.isascii():
+        return source
+    try:
+        stat = source.stat()
+    except OSError:
+        return source
+    cache_key = (source_text, stat.st_size, stat.st_mtime_ns)
+    cached = _PIL_FONT_PATH_CACHE.get(cache_key)
+    if cached and Path(cached).exists():
+        return Path(cached)
+    suffix = source.suffix.lower() or ".ttf"
+    digest = hashlib.sha1(f"{source_text}|{stat.st_size}|{stat.st_mtime_ns}".encode("utf-8", "surrogatepass")).hexdigest()[:20]
+    last_error = None
+    for cache_dir in writable_ascii_dir_candidates(source):
+        try:
+            root = ensure_writable_dir(cache_dir)
+            target = root / f"font_{digest}{suffix}"
+            if not target.exists() or target.stat().st_size != stat.st_size:
+                shutil.copy2(source, target)
+            _PIL_FONT_PATH_CACHE[cache_key] = str(target)
+            return target
+        except Exception as exc:
+            last_error = exc
+            continue
+    if last_error:
+        log_json("font_ascii_cache_failed", source=source_text, error=str(last_error))
+    return source
+
+
+def estimated_text_width(text, size, spacing=0):
+    units = 0.0
+    for char in str(text or ""):
+        code = ord(char)
+        if code <= 0x7F:
+            units += 0.55
+        elif 0xFF00 <= code <= 0xFFEF:
+            units += 1.0
+        elif 0x4E00 <= code <= 0x9FFF:
+            units += 1.0
+        else:
+            units += 0.85
+    return units * float(size) + max(0, len(str(text or "")) - 1) * float(spacing or 0)
+
+
+def estimated_fit_font_size(lines, max_size, min_size, max_width, spacing=0):
+    for size in range(int(max_size), int(min_size) - 1, -2):
+        if all(estimated_text_width(line, size, spacing) <= max_width for line in lines):
+            return int(size)
+    return int(min_size)
 
 
 def text_width_with_spacing(font, line, spacing=0):
@@ -337,10 +470,12 @@ def text_width_with_spacing(font, line, spacing=0):
 def font_for_path_size(font_path, size):
     from PIL import ImageFont
 
-    key = (str(font_path), int(size))
+    source_path = Path(font_path)
+    load_path = pillow_safe_font_path(source_path)
+    key = (str(load_path), int(size))
     font = _FONT_SIZE_CACHE.get(key)
     if font is None:
-        font = ImageFont.truetype(str(font_path), int(size))
+        font = ImageFont.truetype(str(load_path), int(size))
         _FONT_SIZE_CACHE[key] = font
     return font
 
@@ -358,8 +493,9 @@ def fit_font_size_for_path(lines, font_path, max_size, min_size, max_width=None,
             font = font_for_path_size(path_text, size)
             if all(text_width_with_spacing(font, line, spacing) <= width for line in visible):
                 return int(size)
-    except Exception:
-        return batch.fit_font_size(visible, int(max_size), int(min_size), max_width=width, role="title")
+    except Exception as exc:
+        log_json("font_measure_fallback", path=path_text, error=str(exc))
+        return estimated_fit_font_size(visible, int(max_size), int(min_size), width, spacing)
     return int(min_size)
 
 
@@ -2127,10 +2263,10 @@ def replace_opening_visual(input_path, opening_video, output_path, replace_secon
 
 
 def apply_settings(settings, bundle):
-    title_font = configured_font_path(settings, "titleFontPath", "titleTopFontPath", "标题字体文件")
     title_top_font = configured_font_path(settings, "titleTopFontPath", "titleFontPath", "标题上行字体文件")
-    title_middle_font = configured_font_path(settings, "titleMiddleFontPath", "titleFontPath", "标题中行字体文件")
-    title_bottom_font = configured_font_path(settings, "titleBottomFontPath", "titleFontPath", "标题下行字体文件")
+    title_middle_font = configured_font_path(settings, "titleMiddleFontPath", ("titleTopFontPath", "titleFontPath"), "标题中行字体文件")
+    title_bottom_font = configured_font_path(settings, "titleBottomFontPath", ("titleTopFontPath", "titleFontPath"), "标题下行字体文件")
+    title_font = title_top_font
     caption_font = Path(require(settings.get("captionFontPath"), "字幕字体文件"))
     text_effect_font = Path(settings.get("textEffectFontPath") or caption_font)
     disclaimer_font = Path(settings.get("disclaimerFontPath") or caption_font)
@@ -2142,8 +2278,6 @@ def apply_settings(settings, bundle):
     output_subdir = safe_output_subdir(settings.get("outputSubdir"))
     if output_subdir:
         output_dir = output_dir / output_subdir
-    if not title_font.exists():
-        raise SystemExit(f"标题字体不存在：{title_font}")
     if not title_top_font.exists():
         raise SystemExit(f"标题上行字体不存在：{title_top_font}")
     if not title_middle_font.exists():
@@ -2180,6 +2314,7 @@ def apply_settings(settings, bundle):
     batch.TITLE_BOTTOM_ASS_FONT_FAMILY = ass_family_for_path(title_bottom_font, batch.TITLE_FONT_FAMILY)
     batch.CAPTION_ASS_FONT_FAMILY = ass_family_for_path(caption_font, batch.CAPTION_FONT_FAMILY)
     batch.DISCLAIMER_ASS_FONT_FAMILY = ass_family_for_path(disclaimer_font, batch.DISCLAIMER_FONT_FAMILY)
+    install_safe_batch_font_loader()
     if disclaimer_font != caption_font:
         batch.CAPTION_FONT_PATH = caption_font
     batch.create_font_asset(required_roles=("caption", "title"))
@@ -2260,13 +2395,13 @@ def caption_fits_for_settings(text, settings):
     if not line:
         return True
     spacing = caption_letter_spacing(settings)
-    if spacing == 0:
-        return batch.caption_fits(line)
     try:
-        font = batch.font_for_size(batch.CAPTION_FONT_SIZE, "caption")
+        font_path = Path((settings or {}).get("captionFontPath") or batch.CAPTION_FONT_PATH)
+        font = font_for_path_size(font_path, batch.CAPTION_FONT_SIZE)
         return text_width_with_spacing(font, line, spacing) <= batch.SAFE_TEXT_WIDTH
-    except Exception:
-        return batch.caption_fits(line)
+    except Exception as exc:
+        log_json("caption_measure_fallback", error=str(exc))
+        return estimated_text_width(line, batch.CAPTION_FONT_SIZE, spacing) <= batch.SAFE_TEXT_WIDTH
 
 
 def auto_caption_pages(caption_units, settings=None):
@@ -2350,78 +2485,6 @@ def validate_pages(pages, caption_units, settings=None):
     if covered != expected_coverage:
         issues.append("分页没有按顺序完整覆盖所有字幕单元")
     return issues, normalized
-
-
-def valid_lines_for_text(text, settings=None):
-    expected = batch.display_line(text)
-    if not expected:
-        return []
-
-    candidates = []
-    if caption_fits_for_settings(expected, settings):
-        candidates.append([expected])
-
-    if not caption_single_line(settings):
-        readable = batch.split_by_readability(expected)
-        if readable:
-            candidates.append(readable)
-
-        width_chunks = batch.chunk_by_caption_width(expected)
-        if 1 <= len(width_chunks) <= 2:
-            candidates.append(width_chunks)
-
-        tokens = batch.protected_tokens(expected)
-        for split in range(1, len(tokens)):
-            left = "".join(tokens[:split]).strip("，,；;：: ")
-            right = "".join(tokens[split:]).strip("，,；;：: ")
-            if left and right:
-                candidates.append([left, right])
-
-    ranked = []
-    seen = set()
-    for lines in candidates:
-        normalized = [batch.display_line(line) for line in lines if batch.display_line(line)]
-        key = tuple(normalized)
-        max_lines = 1 if caption_single_line(settings) else 2
-        if key in seen or not (1 <= len(normalized) <= max_lines):
-            continue
-        seen.add(key)
-        if "".join(normalized) != expected:
-            continue
-        if not all(caption_fits_for_settings(line, settings) for line in normalized):
-            continue
-        readability_issues = [issue for issue in batch.caption_line_issues(normalized) if "超宽" not in issue]
-        if readability_issues:
-            continue
-        if len(normalized) == 2:
-            penalty = batch.caption_break_penalty(normalized[0], normalized[1])
-        else:
-            penalty = 0
-        ranked.append((penalty, normalized))
-
-    if not ranked:
-        return []
-    return min(ranked, key=lambda item: item[0])[1]
-
-
-def repair_caption_pages(caption_units, settings=None):
-    repaired = []
-    cursor = 0
-    while cursor < len(caption_units):
-        best = None
-        max_end = min(len(caption_units) - 1, cursor + 5)
-        for end in range(max_end, cursor - 1, -1):
-            text = "".join(caption_units[i]["text"] for i in range(cursor, end + 1))
-            lines = valid_lines_for_text(text, settings)
-            if lines:
-                best = (end, lines)
-                break
-        if not best:
-            return []
-        end, lines = best
-        repaired.append({"start": cursor, "end": end, "lines": lines})
-        cursor = end + 1
-    return repaired
 
 
 def sanitize_caption_lines(lines):
@@ -2735,19 +2798,6 @@ def supervise_caption_breaks(settings, item):
                 "问题：\n" + "\n".join(issues)
             ),
         })
-    repaired = repair_caption_pages(caption_units, settings)
-    if repaired:
-        repair_issues, normalized = validate_pages(repaired, caption_units, settings)
-        if not repair_issues:
-            log_json(
-                "caption_review_repaired",
-                slug=item["slug"],
-                pages=len(normalized),
-                model_attempts=4,
-                model_issues=last_issues[:8],
-            )
-            return normalized
-        last_issues = last_issues + ["本地兜底仍未通过："] + repair_issues
     raise SystemExit(f"{item['slug']} 字幕换行模型审查失败：\n" + "\n".join(last_issues))
 
 
