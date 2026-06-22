@@ -612,6 +612,58 @@ def safe_output_subdir(value):
     return text[:80] or ""
 
 
+def safe_filename_part(value, fallback):
+    text = str(value or "").strip()
+    if not text:
+        text = str(fallback or "").strip()
+    text = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", text)
+    text = re.sub(r"\s+", "_", text).strip(" ._")
+    return text[:60] or str(fallback or "未命名")
+
+
+def account_name_for_settings(settings):
+    try:
+        account_index = int(settings.get("chanjingAccountIndex") or settings.get("runChanjingAccountIndex") or 1)
+    except Exception:
+        account_index = 1
+    accounts = settings.get("chanjingAccounts")
+    if isinstance(accounts, list) and 1 <= account_index <= len(accounts):
+        account = accounts[account_index - 1]
+        if isinstance(account, dict):
+            name = account.get("name") or account.get("label")
+        else:
+            name = account
+        if str(name or "").strip():
+            return str(name).strip()
+    return f"账号{max(1, account_index)}"
+
+
+def output_date_label(timestamp=None):
+    current = time.localtime(timestamp or time.time())
+    return f"{current.tm_mon}.{current.tm_mday}"
+
+
+def unique_output_path(path):
+    path = Path(path)
+    if not path.exists():
+        return path
+    for counter in range(2, 1000):
+        candidate = path.with_name(f"{path.stem}_{counter:02d}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    return path.with_name(f"{path.stem}_{int(time.time())}{path.suffix}")
+
+
+def final_output_filename(settings, suffix=".mp4"):
+    date_part = output_date_label()
+    account_part = safe_filename_part(account_name_for_settings(settings), "账号")
+    template_part = safe_filename_part(
+        settings.get("activeTemplateName") or settings.get("currentTemplateId") or settings.get("activeTemplateId"),
+        "模板",
+    )
+    return f"{date_part}_{account_part}_{template_part}{suffix}"
+
+
 def subtitle_units(units, settings):
     hide_cta = hide_cta_captions(settings)
     return [
@@ -2927,7 +2979,8 @@ def tighten_and_mix_selected_bgm(
     settings = settings or {}
     sfx_starts_original = sorted(float(start) for start in (sfx_starts_original or []))
     total = batch.duration(input_path)
-    trim_silence_enabled = settings.get("trimSilenceEnabled", True) is not False
+    trim_silence_disabled = bool_setting(settings.get("disableSilenceTrim"))
+    trim_silence_enabled = not trim_silence_disabled and settings.get("trimSilenceEnabled", True) is not False
     silence_min_seconds = bounded_number(settings.get("silenceMinSeconds"), 0.18, 0.05, 2.0)
     silence_keep_buffer = bounded_number(settings.get("silenceKeepBufferSeconds"), 0.04, 0.0, 0.5)
     if trim_silence_enabled:
@@ -3708,6 +3761,7 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             "chanjing_account_index": str(settings.get("chanjingAccountIndex", "")),
             "chanjing_asset_index": str(settings.get("chanjingAssetIndex", "")),
             "caption_buffer_seconds": f"{caption_buffer_seconds(settings):.3f}",
+            "disable_silence_trim": bool_setting(settings.get("disableSilenceTrim")),
             "pip_duration_seconds": f"{pip_duration_seconds(settings):.3f}",
             "pip_close_at_sentence_end": pip_close_at_sentence_end(settings),
             "effect_priority_policy": "user_configured_0_to_10_lower_number_wins",
@@ -3910,7 +3964,7 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             report_extra=report_extra,
         )
 
-        copied = runtime["output_dir"] / final.name
+        copied = unique_output_path(runtime["output_dir"] / final_output_filename(settings, final.suffix))
         shutil.copy2(final, copied)
         completed_at = time.time()
         state["items"].setdefault(slug, {})["final_path"] = str(copied)

@@ -202,6 +202,7 @@ function defaultSettings() {
     captionLetterSpacing: 0,
     captionSingleLine: false,
     captionBufferSeconds: 0.12,
+    disableSilenceTrim: false,
     trimSilenceEnabled: true,
     silenceMinSeconds: 0.18,
     silenceKeepBufferSeconds: 0.04,

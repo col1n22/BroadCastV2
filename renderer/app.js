@@ -104,6 +104,7 @@ const fields = [
   'captionLetterSpacing',
   'captionSingleLine',
   'captionBufferSeconds',
+  'disableSilenceTrim',
   'trimSilenceEnabled',
   'silenceMinSeconds',
   'silenceKeepBufferSeconds',
@@ -656,14 +657,7 @@ function formatTimestamp(value) {
 function compactTimestamp(value = Date.now()) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(Date.now());
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, '0'),
-    String(date.getDate()).padStart(2, '0'),
-    String(date.getHours()).padStart(2, '0'),
-    String(date.getMinutes()).padStart(2, '0'),
-    String(date.getSeconds()).padStart(2, '0')
-  ].join('');
+  return `${date.getFullYear()}年${String(date.getMonth() + 1).padStart(2, '0')}月${String(date.getDate()).padStart(2, '0')}日${String(date.getHours()).padStart(2, '0')}时${String(date.getMinutes()).padStart(2, '0')}分${String(date.getSeconds()).padStart(2, '0')}秒`;
 }
 
 function eventTimeMs(event, key, fallback = Date.now()) {
@@ -1693,8 +1687,10 @@ function clampNumber(value, min, max) {
 function normalizeSilenceTrimSettings(source = {}) {
   const minSeconds = clampNumber(Number(source.silenceMinSeconds || 0.18), 0.05, 2);
   const keepBuffer = clampNumber(Number(source.silenceKeepBufferSeconds ?? 0.04), 0, 0.5);
+  const disabled = Boolean(source.disableSilenceTrim);
   return {
-    trimSilenceEnabled: source.trimSilenceEnabled !== false,
+    disableSilenceTrim: disabled,
+    trimSilenceEnabled: !disabled && source.trimSilenceEnabled !== false,
     silenceMinSeconds: Number(minSeconds.toFixed(3)),
     silenceKeepBufferSeconds: Number(keepBuffer.toFixed(3)),
     silenceMiddleKeepSeconds: Number((keepBuffer * 2).toFixed(3))
@@ -1702,12 +1698,18 @@ function normalizeSilenceTrimSettings(source = {}) {
 }
 
 function syncSilenceTrimFields() {
-  const enabled = Boolean($('trimSilenceEnabled')?.checked);
+  const disabled = Boolean($('disableSilenceTrim')?.checked);
+  const enabled = !disabled && Boolean($('trimSilenceEnabled')?.checked);
   const normalized = normalizeSilenceTrimSettings({
+    disableSilenceTrim: disabled,
     trimSilenceEnabled: enabled,
     silenceMinSeconds: $('silenceMinSeconds')?.value || settings.silenceMinSeconds,
     silenceKeepBufferSeconds: $('silenceKeepBufferSeconds')?.value || settings.silenceKeepBufferSeconds
   });
+  if ($('trimSilenceEnabled')) {
+    $('trimSilenceEnabled').checked = normalized.trimSilenceEnabled;
+    $('trimSilenceEnabled').disabled = normalized.disableSilenceTrim;
+  }
   if ($('silenceMiddleKeepSeconds')) {
     $('silenceMiddleKeepSeconds').value = String(normalized.silenceMiddleKeepSeconds);
   }
@@ -4915,7 +4917,7 @@ async function startRun() {
 
   const queueId = ++queueSeq;
   const createdAt = Date.now();
-  const batchOutputName = `任务${compactTimestamp(createdAt)}${String(queueId).padStart(3, '0')}`;
+  const batchOutputName = `任务${compactTimestamp(createdAt)}第${String(queueId).padStart(3, '0')}批`;
   const item = {
     id: queueId,
     name: currentSummary?.meta?.name || '未命名任务',
@@ -5291,8 +5293,8 @@ async function init() {
     });
   });
 
-  ['trimSilenceEnabled', 'silenceMinSeconds', 'silenceKeepBufferSeconds'].forEach((id) => {
-    const eventName = id === 'trimSilenceEnabled' ? 'change' : 'input';
+  ['disableSilenceTrim', 'trimSilenceEnabled', 'silenceMinSeconds', 'silenceKeepBufferSeconds'].forEach((id) => {
+    const eventName = id === 'silenceMinSeconds' || id === 'silenceKeepBufferSeconds' ? 'input' : 'change';
     $(id)?.addEventListener(eventName, syncSilenceTrimFields);
   });
 
