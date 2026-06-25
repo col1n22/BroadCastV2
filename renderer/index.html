@@ -213,7 +213,7 @@
                   <span class="preview-resize-handle"></span>
                 </div>
                 <div id="previewCaptionBox" class="preview-box preview-caption-box" data-preview-box="caption">
-                  <div id="previewCaptionText">很多糖友一看血糖高就问是不是药不够</div>
+                  <div id="previewCaptionText">昨夜西风吹折千林梢</div>
                   <span class="preview-resize-handle"></span>
                 </div>
                 <div id="previewTextEffectBox" class="preview-box preview-text-effect-box" data-preview-box="textEffect">
@@ -303,6 +303,10 @@
                     <select data-preview-font-select="titleBottomFontPath"></select>
                   </div>
                 </div>
+                <div class="field">
+                  <label>标题字号</label>
+                  <input id="titleFontSizePreview" data-preview-style-target="titleFontSize" type="number" min="48" max="220" step="1" />
+                </div>
                 <div class="title-spacing-grid">
                   <div class="field">
                     <label>上行字间距</label>
@@ -391,6 +395,10 @@
                 <div class="field">
                   <label>字幕字体文件</label>
                   <select data-preview-font-select="captionFontPath"></select>
+                </div>
+                <div class="field">
+                  <label>字幕字号</label>
+                  <input id="captionFontSizePreview" data-preview-style-target="captionFontSize" type="number" min="36" max="160" step="1" />
                 </div>
                 <div class="object-style-grid">
                   <span class="style-head">字体颜色</span>
@@ -615,7 +623,9 @@
             <input id="titleTopFontPath" />
             <input id="titleMiddleFontPath" />
             <input id="titleBottomFontPath" />
+            <input id="titleFontSize" type="number" />
             <input id="captionFontPath" />
+            <input id="captionFontSize" type="number" />
             <input id="textEffectFontPath" />
             <input id="disclaimerFontPath" />
             <input id="titleTopColor" type="color" />
@@ -653,6 +663,19 @@
                 <span id="fontLibraryCount">0 个字体</span>
               </div>
               <div id="fontLibraryList" class="font-library-list"></div>
+            </div>
+
+            <div class="settings-card">
+              <h3>文字字号</h3>
+              <div class="field">
+                <label>标题字号</label>
+                <input data-preview-style-target="titleFontSize" type="number" min="48" max="220" step="1" />
+              </div>
+              <div class="field">
+                <label>字幕字号</label>
+                <input data-preview-style-target="captionFontSize" type="number" min="36" max="160" step="1" />
+              </div>
+              <p class="hint">这里会同步到当前模板；在模板预览里拖拽拉伸文字框时也会同步更新字号。</p>
             </div>
 
             <div class="settings-card">

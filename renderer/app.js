@@ -23,6 +23,7 @@ const fields = [
   'titleTopFontPath',
   'titleMiddleFontPath',
   'titleBottomFontPath',
+  'titleFontSize',
   'titleTopLetterSpacing',
   'titleMiddleLetterSpacing',
   'titleBottomLetterSpacing',
@@ -41,6 +42,7 @@ const fields = [
   'titleBgPaddingY',
   'titleBgRadius',
   'captionFontPath',
+  'captionFontSize',
   'textEffectFontPath',
   'disclaimerFontPath',
   'bgmFile',
@@ -227,6 +229,7 @@ const templateFields = [
   'titleTopFontPath',
   'titleMiddleFontPath',
   'titleBottomFontPath',
+  'titleFontSize',
   'titleTopLetterSpacing',
   'titleMiddleLetterSpacing',
   'titleBottomLetterSpacing',
@@ -245,6 +248,7 @@ const templateFields = [
   'titleBgPaddingY',
   'titleBgRadius',
   'captionFontPath',
+  'captionFontSize',
   'textEffectFontPath',
   'disclaimerFontPath',
   'titleTopColor',
@@ -303,6 +307,7 @@ const templateFields = [
 const previewCanvas = { width: 1080, height: 1920 };
 const previewSafeTextWidth = 980;
 const previewTitleMinFontSize = 72;
+const previewCaptionSampleText = '昨夜西风吹折千林梢';
 const pipAspectRatio = 16 / 9;
 const previewDefaults = {
   title: { prefix: 'previewTitle', x: 80, y: 980, w: 920, h: 500, minW: 260, minH: 170 },
@@ -1684,6 +1689,13 @@ function clampNumber(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function previewFontSizeValue(key, fallback, min, max) {
+  const sourceValue = $(key)?.value;
+  const raw = sourceValue !== undefined && sourceValue !== '' ? sourceValue : settings[key] ?? fallback;
+  const value = Number(raw);
+  return clampNumber(Number.isFinite(value) && value > 0 ? value : fallback, min, max);
+}
+
 function normalizeSilenceTrimSettings(source = {}) {
   const minSeconds = clampNumber(Number(source.silenceMinSeconds || 0.18), 0.05, 2);
   const keepBuffer = clampNumber(Number(source.silenceKeepBufferSeconds ?? 0.04), 0, 0.5);
@@ -1971,13 +1983,15 @@ function applyPreviewBox(kind, box) {
   el.style.height = `${(box.h / previewCanvas.height) * 100}%`;
 
   if (kind === 'title') {
-    const titleBaseSize = clampNumber(box.h * 0.3, 72, 180);
+    const titleBaseSize = previewFontSizeValue('titleFontSize', box.h * 0.3, 48, 220);
+    const titleMinSize = Math.min(previewTitleMinFontSize, titleBaseSize);
     const top = el.querySelector('.preview-title-top');
     const middle = el.querySelector('.preview-title-middle');
     const bottom = el.querySelector('.preview-title-bottom');
-    const topSize = fitPreviewAssFontSize([top?.textContent || ''], titleBaseSize, previewTitleMinFontSize, previewSafeTextWidth, 'titleTop');
-    const middleSize = fitPreviewAssFontSize([middle?.textContent || ''], titleBaseSize, previewTitleMinFontSize, previewSafeTextWidth, 'titleMiddle');
-    const bottomSize = fitPreviewAssFontSize([bottom?.textContent || ''], Math.round(titleBaseSize * 0.92), previewTitleMinFontSize, previewSafeTextWidth, 'titleBottom');
+    const bottomBaseSize = Math.round(titleBaseSize * 0.92);
+    const topSize = fitPreviewAssFontSize([top?.textContent || ''], titleBaseSize, titleMinSize, previewSafeTextWidth, 'titleTop');
+    const middleSize = fitPreviewAssFontSize([middle?.textContent || ''], titleBaseSize, titleMinSize, previewSafeTextWidth, 'titleMiddle');
+    const bottomSize = fitPreviewAssFontSize([bottom?.textContent || ''], bottomBaseSize, Math.min(titleMinSize, bottomBaseSize), previewSafeTextWidth, 'titleBottom');
     top.style.fontSize = `${topSize * scale}px`;
     middle.style.fontSize = `${middleSize * scale}px`;
     bottom.style.fontSize = `${bottomSize * scale}px`;
@@ -1990,8 +2004,7 @@ function applyPreviewBox(kind, box) {
     middle.style.top = `${middleY}px`;
     bottom.style.top = `${middleY + lineSpacing}px`;
   } else if (kind === 'caption') {
-    const maxSize = clampNumber(box.h * 0.44, 48, 128);
-    const size = fitPreviewBoxFontSize($('previewCaptionText'), box, maxSize, 18, 'caption', 1.22);
+    const size = previewFontSizeValue('captionFontSize', box.h * 0.44, 36, 160);
     el.style.fontSize = `${size * scale}px`;
   } else if (kind === 'textEffect') {
     const maxSize = clampNumber(box.h * 0.44, 48, 128);
@@ -2040,6 +2053,7 @@ function updateSelectedPreviewBoxFromControls() {
     w,
     h
   }, false);
+  syncFontSizeFromPreviewResize(kind);
   fillPreviewCurrentControls(kind);
 }
 
@@ -2274,12 +2288,7 @@ function cleanPreviewCaptionLine(text) {
 }
 
 function generatePreviewCaption() {
-  const item = firstPreviewItem();
-  const content = contentForItem(item) || '很多糖友一看血糖高，就问是不是药不够。';
-  const sentences = splitPreviewSentences(content);
-  const sentence = sentences[3] || sentences[0] || content;
-  const line = cleanPreviewCaptionLine(sentence) || '很多糖友一看血糖高就问是不是药不够';
-  $('previewCaptionText').textContent = line;
+  $('previewCaptionText').textContent = previewCaptionSampleText;
   schedulePreviewLayoutUpdate();
 }
 
@@ -4103,6 +4112,12 @@ async function resetPreviewLayoutToDefaults() {
   for (const [kind, defaults] of Object.entries(previewDefaults)) {
     setPreviewBox(kind, defaults, false);
   }
+  const defaultSizes = { titleFontSize: 144, captionFontSize: 96 };
+  for (const [id, value] of Object.entries(defaultSizes)) {
+    const source = $(id);
+    if (source) source.value = String(value);
+    syncPreviewStyleControls(id);
+  }
   selectPreviewBox($('previewObject')?.value || 'title');
   applyPreviewTextStyle();
   settings = await window.huApp.saveSettings(collectSettings());
@@ -4127,6 +4142,25 @@ function beginPreviewDrag(event) {
   event.preventDefault();
 }
 
+function syncFontSizeFromPreviewResize(kind) {
+  const box = getPreviewBox(kind);
+  const updates = {};
+  if (kind === 'title') {
+    updates.titleFontSize = Math.round(clampNumber(box.h * 0.3, 48, 220));
+  } else if (kind === 'caption') {
+    updates.captionFontSize = Math.round(clampNumber(box.h * 0.44, 36, 160));
+  }
+  for (const [id, value] of Object.entries(updates)) {
+    const source = $(id);
+    if (!source) continue;
+    source.value = String(value);
+    syncPreviewStyleControls(id);
+  }
+  if (Object.keys(updates).length) {
+    schedulePreviewLayoutUpdate();
+  }
+}
+
 function movePreviewDrag(event) {
   if (!previewDragState) return;
   const scale = previewScale() || 1;
@@ -4146,6 +4180,9 @@ function movePreviewDrag(event) {
     next.y += dy;
   }
   setPreviewBox(previewDragState.kind, next);
+  if (previewDragState.mode === 'resize') {
+    syncFontSizeFromPreviewResize(previewDragState.kind);
+  }
 }
 
 function endPreviewDrag() {

@@ -118,6 +118,7 @@ function defaultSettings() {
     titleTopFontPath: defaultTitleFontPath,
     titleMiddleFontPath: defaultTitleFontPath,
     titleBottomFontPath: defaultTitleFontPath,
+    titleFontSize: 144,
     titleTopLetterSpacing: 0,
     titleMiddleLetterSpacing: 0,
     titleBottomLetterSpacing: 0,
@@ -136,6 +137,7 @@ function defaultSettings() {
     titleBgPaddingY: 18,
     titleBgRadius: 12,
     captionFontPath: defaultCaptionFontPath,
+    captionFontSize: 96,
     textEffectFontPath: defaultCaptionFontPath,
     disclaimerFontPath: defaultCaptionFontPath,
     bgmFile: path.join(bundlePath, 'assets', 'BGM', 'bgm2.mp3'),
@@ -542,7 +544,7 @@ function titleLinesFromCandidate(text) {
     .split(/[，。！？；：、,.!?;:]+/)
     .map(stripBoundaryPunctuation)
     .filter(Boolean);
-  if (parts.length >= 2 && parts.slice(0, 3).every((line) => titleCharLength(line) <= 16)) {
+  if (parts.length >= 2) {
     return parts.slice(0, 3);
   }
   const oneLine = stripBoundaryPunctuation(normalized);
@@ -571,25 +573,35 @@ function splitCustomTextGroups(text) {
     .filter((lines) => lines.length);
 }
 
+function customFirstLineIsTitle(lines) {
+  const firstLine = Array.isArray(lines) ? (lines[0] || '') : '';
+  return lines.length > 1 && titleCharLength(firstLine) > 0 && titleCharLength(firstLine) <= 24;
+}
+
 function buildCustomItemsFromGroups(groups, decisions) {
   if (!Array.isArray(decisions) || decisions.length !== groups.length) {
     throw new Error(`模型返回条数不一致：需要 ${groups.length} 条，实际 ${Array.isArray(decisions) ? decisions.length : 0} 条`);
   }
   return groups.map((lines, groupIndex) => {
     const decision = decisions[groupIndex] || {};
+    const firstLineIsTitle = customFirstLineIsTitle(lines);
     const rawIndexes = Array.isArray(decision.contentLineIndexes)
       ? decision.contentLineIndexes
       : (Array.isArray(decision.content_line_indexes) ? decision.content_line_indexes : []);
-    const indexes = rawIndexes
+    let indexes = rawIndexes
       .map((value) => Number(value))
       .filter((value, pos, arr) => Number.isInteger(value) && value >= 1 && value <= lines.length && arr.indexOf(value) === pos);
+    if (firstLineIsTitle) {
+      indexes = lines.slice(1).map((_line, index) => index + 2);
+    }
     if (!indexes.length) {
       throw new Error(`第 ${groupIndex + 1} 组模型没有返回正文行`);
     }
     const rawTitle = decision.title ?? decision.titleLines ?? decision.title_lines ?? '';
-    const titleLines = Array.isArray(rawTitle)
+    const modelTitleLines = Array.isArray(rawTitle)
       ? rawTitle.map(stripBoundaryPunctuation).filter(Boolean).slice(0, 3)
       : titleLinesFromCandidate(rawTitle || '');
+    const titleLines = firstLineIsTitle ? titleLinesFromCandidate(lines[0]) : modelTitleLines;
     const contentLines = indexes.map((lineIndex) => lines[lineIndex - 1]);
     const content = normalizeBodyPunctuation(contentLines.join(''));
     const finalTitleLines = titleLines.length ? titleLines : derivedTitleLines(contentLines, content);
@@ -607,9 +619,8 @@ function buildCustomItemsFromGroups(groups, decisions) {
 
 function parseCustomTextItems(text) {
   return splitCustomTextGroups(text).map((lines, groupIndex) => {
-    const firstLine = lines[0] || '';
-    const firstLineIsTitle = lines.length > 1 && titleCharLength(firstLine) > 0 && titleCharLength(firstLine) <= 24;
-    const titleLines = firstLineIsTitle ? titleLinesFromCandidate(firstLine) : [];
+    const firstLineIsTitle = customFirstLineIsTitle(lines);
+    const titleLines = firstLineIsTitle ? titleLinesFromCandidate(lines[0]) : [];
     const contentLines = firstLineIsTitle ? lines.slice(1) : lines;
     const content = normalizeBodyPunctuation(contentLines.join(''));
     const finalTitleLines = titleLines.length ? titleLines : derivedTitleLines(contentLines, content);
@@ -695,7 +706,8 @@ async function modelCustomTextItems(text, settings) {
       content: [
         '你是中文短视频口播文案整理助手，只输出合法 JSON。',
         '你负责判断每个空行分组里的标题和正文行，但不要改写正文。',
-        '标题可以整理为 1-3 行；没有标题时，从正文前三句或前三行整理三行标题。',
+        '如果第一行本身就是标题，必须原样使用第一行作为标题来源，不要改写标题。',
+        '没有标题时，从正文前三句或前三行整理三行标题。',
         '标题必须使用原文已有信息，不新增事实，不夸大医疗承诺。'
       ].join('\n')
     },
@@ -704,7 +716,7 @@ async function modelCustomTextItems(text, settings) {
       content: JSON.stringify({
         task: '按空行分组整理口播文案',
         rules: [
-          '每组第一行如果比较短、像标题，就把它作为标题来源，后面行作为正文',
+          '每组第一行如果比较短、像标题，就把它作为标题来源，后面行作为正文；不要改写这行标题',
           '如果第一行不是标题，整组都作为正文',
           '正文只允许由 contentLineIndexes 指定原始行，程序会只改标点；你不要输出改写后的正文',
           '没有标题时，由正文前三句或前三行整理成三行标题',

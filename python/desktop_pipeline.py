@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 import traceback
+import urllib.error
 import urllib.request
 import urllib.parse
 from pathlib import Path
@@ -673,6 +674,205 @@ def subtitle_units(units, settings):
         and unit.get("visible")
         and not (hide_cta and unit.get("source") == "cta")
     ]
+
+
+CAPTION_ATOMIC_MAX_DISPLAY_CHARS = 10
+CAPTION_ATOMIC_PROTECTED_PAIRS = {
+    "胰岛",
+    "血糖",
+    "国家",
+    "专利",
+    "基础",
+    "总结",
+    "恢复",
+    "功能",
+    "受损",
+    "控糖",
+    "自主",
+    "能力",
+    "获批",
+    "辩证",
+    "回来",
+    "来了",
+    "性味",
+    "家传",
+    "标本",
+    "逆从",
+    "疗法",
+    "标本逆从疗法",
+    "团队",
+    "核心",
+    "2022年",
+    "报道",
+    "带领",
+    "逐步",
+    "撤除",
+    "过来了",
+    "了解",
+    "不对着血糖发力",
+    "修复受损胰岛",
+    "消除胰岛素抵抗",
+    "让胰岛",
+    "一步步恢复",
+    "自主控糖能力",
+    "胰岛功能回来了",
+    "血糖自然稳",
+    "自然用不着",
+    "核心是让受损的",
+    "胰岛恢复",
+    "停用传统降糖药",
+    "胰岛素逐步撤除",
+    "不是压住的",
+    "真的缓过来了",
+    "是真的缓过来了",
+    "是我带领团队",
+    "向量和辩证基础上",
+    "总结而来",
+    "后面中药也不用",
+    "血糖自己就能稳住",
+    "如果你也想了解此方案",
+    "下方留需要二字",
+    "点右侧头像",
+    "后台找我",
+}
+BAD_SINGLE_LINE_STARTS = ("的", "了", "来", "和", "在", "上", "复", "糖", "岛", "着", "心", "是", "道", "领", "而")
+BAD_SINGLE_LINE_ENDS = ("的", "了", "在", "和", "而", "让", "把", "是", "向", "受损的", "核")
+
+
+def display_char_count(text):
+    return len(batch.display_line(text))
+
+
+def local_protected_tokens(text):
+    phrases = sorted(
+        set(getattr(batch, "PROTECTED_PHRASES", [])) | CAPTION_ATOMIC_PROTECTED_PAIRS | {"修复", "回来了", "新华社", "人民网"},
+        key=len,
+        reverse=True,
+    )
+    tokens = []
+    i = 0
+    text = str(text or "")
+    while i < len(text):
+        match = None
+        for phrase in phrases:
+            if phrase and text.startswith(phrase, i):
+                match = phrase
+                break
+        if match:
+            tokens.append(match)
+            i += len(match)
+        else:
+            tokens.append(text[i])
+            i += 1
+    return tokens
+
+
+def split_oversize_caption_token(token, max_chars=CAPTION_ATOMIC_MAX_DISPLAY_CHARS):
+    if display_char_count(token) <= max_chars:
+        return [token]
+    chunks = []
+    current = ""
+    for char in str(token):
+        candidate = current + char
+        if current and display_char_count(candidate) > max_chars:
+            chunks.append(current)
+            current = char
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def split_caption_unit_text(text, max_chars=CAPTION_ATOMIC_MAX_DISPLAY_CHARS):
+    text = str(text or "")
+    parts = []
+    for token in local_protected_tokens(text):
+        if not batch.display_line(token):
+            continue
+        parts.extend(split_oversize_caption_token(token, max_chars=max_chars))
+    return [part for part in parts if batch.display_line(part)] or ([text] if text else [])
+
+
+def split_long_caption_units(units):
+    result = []
+    for unit in units or []:
+        if unit.get("source") == "title":
+            result.append(unit)
+            continue
+        parts = split_caption_unit_text(unit.get("text", ""))
+        if len(parts) <= 1:
+            result.append(unit)
+            continue
+        for part in parts:
+            updated = dict(unit)
+            updated["text"] = part
+            result.append(updated)
+    return result
+
+
+def reflow_caption_units(units):
+    result = []
+    group = []
+
+    def flush_group():
+        if not group:
+            return
+        base = dict(group[0])
+        text = "".join(str(unit.get("text", "")) for unit in group)
+        for part in split_caption_unit_text(text):
+            updated = dict(base)
+            updated["text"] = part
+            result.append(updated)
+        group.clear()
+
+    for unit in units or []:
+        if unit.get("source") == "title":
+            flush_group()
+            result.append(unit)
+            continue
+        if (
+            group
+            and (
+                group[-1].get("sentence_index") != unit.get("sentence_index")
+                or group[-1].get("source") != unit.get("source")
+                or group[-1].get("visible") != unit.get("visible")
+            )
+        ):
+            flush_group()
+        group.append(unit)
+    flush_group()
+    return result
+
+
+def build_item_spoken_units(item):
+    text = str((item or {}).get("text") or "")
+    hook, units = batch.build_spoken_units(text)
+    units = reflow_caption_units(units)
+    return hook, units, 3
+
+
+def apply_llm_cta_start_to_units(units, cta_start_sentence_index):
+    if cta_start_sentence_index is None:
+        for unit in units:
+            if unit.get("source") != "title":
+                unit["source"] = "body"
+        return units
+    try:
+        start_index = int(cta_start_sentence_index)
+    except Exception:
+        return units
+    for unit in units:
+        if unit.get("source") == "title":
+            continue
+        sentence_index = unit.get("sentence_index")
+        try:
+            sentence_index = int(sentence_index)
+        except Exception:
+            unit["source"] = "body"
+            continue
+        unit["source"] = "cta" if sentence_index >= start_index else "body"
+    return units
 
 
 def selected_text_effect_ids(settings):
@@ -2409,8 +2609,33 @@ def chat_completion(settings, messages):
             "Authorization": f"Bearer {api_key}",
         },
     )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
+    timeout_seconds = 240
+    max_attempts = 3
+    retry_delays = [3, 8]
+    payload = None
+    for attempt in range(max_attempts):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as exc:
+            retryable = exc.code in (408, 429) or 500 <= exc.code <= 599
+            if not retryable or attempt >= max_attempts - 1:
+                detail = ""
+                try:
+                    detail = exc.read().decode("utf-8", errors="replace")
+                except Exception:
+                    detail = str(exc)
+                raise RuntimeError(f"model API request failed: HTTP {exc.code}: {detail}") from exc
+        except (TimeoutError, socket.timeout) as exc:
+            if attempt >= max_attempts - 1:
+                raise RuntimeError(f"model API request timed out after {timeout_seconds}s") from exc
+        except urllib.error.URLError as exc:
+            reason = getattr(exc, "reason", None)
+            retryable = isinstance(reason, (TimeoutError, socket.timeout)) or "timed out" in str(reason).lower()
+            if not retryable or attempt >= max_attempts - 1:
+                raise
+        time.sleep(retry_delays[min(attempt, len(retry_delays) - 1)])
     try:
         return payload["choices"][0]["message"]["content"]
     except Exception as exc:
@@ -2434,6 +2659,82 @@ def extract_json(text):
     return parsed
 
 
+def llm_cta_start_sentence_index(settings, item):
+    if not hide_cta_captions(settings):
+        return None
+    cache_key = "_llm_cta_start_sentence_index"
+    if cache_key in item:
+        return item.get(cache_key)
+    sentences = batch.split_sentences(item.get("text", ""))
+    _hook, _units, min_cta_index = build_item_spoken_units(item)
+    if len(sentences) <= min_cta_index:
+        item[cache_key] = None
+        return None
+    payload = [
+        {
+            "index": index,
+            "text": sentence,
+            "display_text": batch.display_line(sentence),
+        }
+        for index, sentence in enumerate(sentences)
+    ]
+    prompt = {
+        "task": "判断中文短视频口播文案从哪一句开始进入 CTA 互动/引流结尾",
+        "rules": [
+            "只返回 JSON 对象，不要解释。",
+            "返回格式：{\"cta_start\":数字或null,\"reason\":\"简短原因\"}。",
+            f"index 从 0 开始；小于 {min_cta_index} 的句子不能作为 CTA 起点。",
+            "CTA 指引导观众关注、评论、留言、私信、点击头像、到主页、后台找我、留下需要/支持/问题/情况、提交血糖用药信息等互动或转化句。",
+            "从你判断的第一句 CTA 开始，后面所有句子都会被软件隐藏字幕；所以不要把普通科普、身份背书、风险提醒、别停药别乱改这类正文误判为 CTA。",
+            "如果没有明确 CTA，cta_start 返回 null。",
+        ],
+        "sentences": payload,
+    }
+    messages = [
+        {
+            "role": "system",
+            "content": "你是短视频口播 CTA 边界审核员。你只输出合法 JSON。",
+        },
+        {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
+    ]
+    last_error = None
+    for attempt in range(1, 4):
+        try:
+            result = extract_json(chat_completion(settings, messages))
+            if isinstance(result, list):
+                result = result[0] if result else {}
+            if not isinstance(result, dict):
+                raise ValueError("模型返回不是 JSON 对象")
+            raw_start = result.get("cta_start")
+            if raw_start in (None, "", "null", "None", -1):
+                item[cache_key] = None
+                log_json("cta_review_ok", slug=item.get("slug", ""), cta_start=None, attempt=attempt)
+                return None
+            start = int(raw_start)
+            if start < min_cta_index or start >= len(sentences):
+                raise ValueError(f"cta_start 越界：{raw_start}")
+            item[cache_key] = start
+            log_json(
+                "cta_review_ok",
+                slug=item.get("slug", ""),
+                cta_start=start,
+                sentence=sentences[start],
+                attempt=attempt,
+            )
+            return start
+        except Exception as exc:
+            last_error = exc
+            messages.append({
+                "role": "user",
+                "content": (
+                    "上一次 CTA 判断返回不合格，请只返回 JSON 对象，"
+                    "格式必须是 {\"cta_start\":数字或null,\"reason\":\"简短原因\"}。"
+                    f"错误：{exc}"
+                ),
+            })
+    raise SystemExit(f"{item.get('slug', '')} CTA 模型审核失败：{last_error}")
+
+
 def caption_single_line(settings):
     return bool_setting((settings or {}).get("captionSingleLine"))
 
@@ -2442,18 +2743,36 @@ def caption_letter_spacing(settings):
     return style_spacing(settings or {}, "captionLetterSpacing", 0)
 
 
+def configured_caption_font_size(settings):
+    return int(round(bounded_number((settings or {}).get("captionFontSize"), batch.CAPTION_FONT_SIZE, 36, 160)))
+
+
+def configured_title_font_size(settings, fallback):
+    return int(round(bounded_number((settings or {}).get("titleFontSize"), fallback, 48, 220)))
+
+
+def caption_line_char_count(line):
+    return len(batch.display_line(line))
+
+
 def caption_fits_for_settings(text, settings):
     line = batch.display_line(text)
     if not line:
         return True
     spacing = caption_letter_spacing(settings)
+    caption_size = configured_caption_font_size(settings)
     try:
         font_path = Path((settings or {}).get("captionFontPath") or batch.CAPTION_FONT_PATH)
-        font = font_for_path_size(font_path, batch.CAPTION_FONT_SIZE)
+        font = font_for_path_size(font_path, caption_size)
         return text_width_with_spacing(font, line, spacing) <= batch.SAFE_TEXT_WIDTH
     except Exception as exc:
         log_json("caption_measure_fallback", error=str(exc))
-        return estimated_text_width(line, batch.CAPTION_FONT_SIZE, spacing) <= batch.SAFE_TEXT_WIDTH
+        return estimated_text_width(line, caption_size, spacing) <= batch.SAFE_TEXT_WIDTH
+
+
+def caption_line_meets_hard_limits(text, settings):
+    line = batch.display_line(text)
+    return bool(line) and caption_line_char_count(line) <= 10 and caption_fits_for_settings(line, settings)
 
 
 def auto_caption_pages(caption_units, settings=None):
@@ -2465,7 +2784,7 @@ def auto_caption_pages(caption_units, settings=None):
             max_end = min(len(caption_units) - 1, cursor + 5)
             for end in range(max_end, cursor - 1, -1):
                 line = batch.display_line("".join(caption_units[i]["text"] for i in range(cursor, end + 1)))
-                if line and caption_fits_for_settings(line, settings):
+                if caption_line_meets_hard_limits(line, settings):
                     best = (end, line)
                     break
             if not best:
@@ -2494,7 +2813,6 @@ def validate_pages(pages, caption_units, settings=None):
         return ["模型返回不是数组"], []
     covered = []
     normalized = []
-    previous_last_line = None
     for page_index, page in enumerate(pages, start=1):
         if not isinstance(page, dict):
             issues.append(f"第 {page_index} 页不是对象")
@@ -2521,21 +2839,86 @@ def validate_pages(pages, caption_units, settings=None):
         if actual != expected:
             issues.append(f"第 {page_index} 页改字或漏字：期望 {expected}，实际 {actual}")
         for line in lines:
+            if caption_line_char_count(line) > 10:
+                issues.append(f"第 {page_index} 页单行超过10字：{line}")
             if not caption_fits_for_settings(line, settings):
                 issues.append(f"第 {page_index} 页单行超宽：{line}")
-        for issue in batch.caption_line_issues(lines):
-            if "超宽" not in issue:
-                issues.append(f"第 {page_index} 页换行不顺：{issue}")
-        if previous_last_line and lines:
-            for issue in batch.caption_page_boundary_issues(previous_last_line, lines[0]):
-                issues.append(f"第 {page_index} 页跨页不顺：{issue}")
-        if lines:
-            previous_last_line = lines[-1]
         covered.extend(range(start, end + 1))
         normalized.append({"start": start, "end": end, "lines": lines})
     expected_coverage = list(range(len(caption_units)))
     if covered != expected_coverage:
         issues.append("分页没有按顺序完整覆盖所有字幕单元")
+    return issues, normalized
+
+
+def objective_single_line_pages(caption_units, settings=None):
+    total = len(caption_units)
+    if not total:
+        return []
+
+    def segment_penalty(start, end, line):
+        clean = batch.display_line(line)
+        length = len(clean)
+        penalty = 0
+        if length < 5:
+            penalty += (5 - length) * 35
+        if length > 10:
+            penalty += 100000
+        penalty += abs(8 - min(length, 10)) * 2
+        if clean.startswith(BAD_SINGLE_LINE_STARTS):
+            penalty += 900
+        if clean.endswith(BAD_SINGLE_LINE_ENDS):
+            penalty += 900
+        sentence_indexes = {
+            caption_units[index].get("sentence_index")
+            for index in range(start, end + 1)
+            if caption_units[index].get("sentence_index") is not None
+        }
+        if len(sentence_indexes) > 1:
+            penalty += 450
+        return penalty
+
+    candidates_by_start = [[] for _ in range(total)]
+    for start in range(total):
+        text = ""
+        for end in range(start, total):
+            text += str(caption_units[end].get("text", ""))
+            line = batch.display_line(text)
+            if not line:
+                continue
+            if len(line) > 10:
+                break
+            if caption_line_meets_hard_limits(line, settings):
+                candidates_by_start[start].append((end, line, segment_penalty(start, end, line)))
+    dp_scores = [float("inf")] * (total + 1)
+    next_choice = [None] * total
+    dp_scores[total] = 0
+    for start in range(total - 1, -1, -1):
+        for end, line, penalty in candidates_by_start[start]:
+            score = penalty + dp_scores[end + 1]
+            if score < dp_scores[start]:
+                dp_scores[start] = score
+                next_choice[start] = (end, line)
+
+    pages = []
+    cursor = 0
+    while cursor < total:
+        choice = next_choice[cursor]
+        if choice is None:
+            line = batch.display_line(caption_units[cursor].get("text", ""))
+            choice = (cursor, line)
+        end, line = choice
+        pages.append({"start": cursor, "end": end, "lines": [line] if line else []})
+        cursor = end + 1
+    return pages
+
+
+def objective_pages_for_hard_rules(caption_units, settings=None):
+    if caption_single_line(settings):
+        pages = objective_single_line_pages(caption_units, settings)
+    else:
+        pages = auto_caption_pages(caption_units, settings)
+    issues, normalized = validate_pages(pages, caption_units, settings)
     return issues, normalized
 
 
@@ -2779,20 +3162,178 @@ def caption_display_events(pages, caption_units, title_end, duration, settings=N
     return [event for event in events if event["end"] > event["start"]]
 
 
+def extract_json_payload(text):
+    text = str(text or "").strip()
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.S)
+    if fenced:
+        text = fenced.group(1).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        starts = [pos for pos in [text.find("["), text.find("{")] if pos >= 0]
+        if not starts:
+            raise
+        return json.loads(text[min(starts):])
+
+
+def caption_units_for_llm(caption_units):
+    return [
+        {
+            "index": index,
+            "source": unit.get("source"),
+            "sentence_index": unit.get("sentence_index"),
+            "text": batch.display_line(unit.get("text", "")),
+        }
+        for index, unit in enumerate(caption_units)
+    ]
+
+
+def caption_pages_for_llm(pages, caption_units):
+    payload = []
+    for page_index, page in enumerate(pages or [], start=1):
+        start = int(page.get("start", 0))
+        end = int(page.get("end", start))
+        payload.append({
+            "page": page_index,
+            "start": start,
+            "end": end,
+            "text": batch.display_line("".join(caption_units[i]["text"] for i in range(start, end + 1))),
+            "lines": sanitize_caption_lines(page.get("lines") or []),
+            "previous_page_text": batch.display_line(
+                "".join(caption_units[i]["text"] for i in range(max(0, start - 8), start))
+            ),
+            "next_page_text": batch.display_line(
+                "".join(caption_units[i]["text"] for i in range(end + 1, min(len(caption_units), end + 9)))
+            ),
+        })
+    return payload
+
+
+def normalize_caption_review_issues(raw_issues):
+    normalized = []
+    if not isinstance(raw_issues, list):
+        return normalized
+    for issue in raw_issues:
+        if isinstance(issue, str):
+            text = issue.strip()
+            if text:
+                normalized.append({"page": None, "reason": text, "suggestion": ""})
+            continue
+        if not isinstance(issue, dict):
+            continue
+        reason = str(issue.get("reason") or issue.get("issue") or "").strip()
+        suggestion = str(issue.get("suggestion") or issue.get("fix") or "").strip()
+        if not reason and not suggestion:
+            continue
+        page = issue.get("page")
+        try:
+            page = int(page) if page not in (None, "") else None
+        except Exception:
+            page = None
+        line = issue.get("line")
+        try:
+            line = int(line) if line not in (None, "") else None
+        except Exception:
+            line = None
+        normalized.append({
+            "page": page,
+            "line": line,
+            "reason": reason or suggestion,
+            "suggestion": suggestion,
+        })
+    return normalized
+
+
+def caption_review_issue_lines(issues):
+    lines = []
+    for issue in issues or []:
+        page = issue.get("page")
+        line = issue.get("line")
+        prefix = "页码未知"
+        if page is not None:
+            prefix = f"第 {page} 页"
+            if line is not None:
+                prefix += f"第 {line} 行"
+        suggestion = issue.get("suggestion") or ""
+        reason = issue.get("reason") or ""
+        lines.append(f"{prefix}: {reason}" + (f"；建议：{suggestion}" if suggestion else ""))
+    return lines
+
+
+def llm_review_caption_pages(settings, item, caption_units, pages):
+    review_rules = [
+        "只返回 JSON 对象，不要解释。",
+        "返回格式必须是 {\"passed\":true,\"issues\":[]} 或 {\"passed\":false,\"issues\":[{\"page\":页码,\"line\":行号或null,\"reason\":\"问题\",\"suggestion\":\"修改建议\"}]}。",
+        "请先完整读 caption_units，再逐页检查 current_pages；页码使用 current_pages 里的 page 字段。",
+        "重点检查：读起来是否顺、是否把一个自然短语拆得别扭、跨页是否卡住、两行搭配是否自然、是否出现类似“饭后高背/后”“胰岛修/复”的断法。",
+        "不要按固定词表机械判断；只有你作为中文口播审稿员读起来确实别扭，才标为问题。",
+        "每行最多 10 个显示字是硬规则；不要建议把单行改成长于 10 个字。",
+        "不能建议改字、漏字、加标点；只能调整 start/end 和 lines 的分组与换行。",
+        "如果没有真实问题，必须返回 passed=true。",
+    ]
+    if caption_single_line(settings):
+        review_rules.extend([
+            "当前开启了单行字幕：每页只能有一行，不能建议把一页改成两行或多行。",
+            "当前开启了单行字幕：不要因为无法合并成两行而判失败；只审核是否存在严重断字、单字虚词开头、明显把固定短语切碎。",
+            "如果你的建议会导致任意一行超过 10 个显示字，或者需要两行字幕，那么这个问题在当前配置下不可修，必须视为通过。",
+        ])
+    prompt = {
+        "task": "作为第二名审稿员，审核中文短视频口播字幕是否真正顺口、自然、没有别扭断行。",
+        "review_rules": review_rules,
+        "caption_units": caption_units_for_llm(caption_units),
+        "current_pages": caption_pages_for_llm(pages, caption_units),
+    }
+    messages = [
+        {
+            "role": "system",
+            "content": "你是严格的中文口播字幕终审员，只输出合法 JSON 对象。",
+        },
+        {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
+    ]
+    last_error = None
+    for attempt in range(1, 4):
+        content = chat_completion(settings, messages)
+        try:
+            result = extract_json_payload(content)
+            if not isinstance(result, dict):
+                raise ValueError("审稿结果不是 JSON 对象")
+            issues = normalize_caption_review_issues(result.get("issues") or [])
+            if not bool(result.get("passed")) and not issues:
+                raise ValueError("审稿未通过时必须给出 issues")
+            passed = bool(result.get("passed")) and not issues
+            log_json(
+                "caption_semantic_review",
+                slug=item.get("slug", ""),
+                passed=passed,
+                issues=len(issues),
+                attempt=attempt,
+            )
+            if issues:
+                log_json("caption_semantic_review_issues", slug=item.get("slug", ""), issues=caption_review_issue_lines(issues))
+            return passed, issues
+        except Exception as exc:
+            last_error = exc
+            messages = messages[:2] + [{
+                "role": "user",
+                "content": (
+                    "上一次审稿返回不是合格 JSON。请只返回 "
+                    "{\"passed\":true,\"issues\":[]} 或 "
+                    "{\"passed\":false,\"issues\":[{\"page\":数字,\"line\":数字或null,\"reason\":\"问题\",\"suggestion\":\"建议\"}]}。\n"
+                    f"错误：{exc}"
+                ),
+            }]
+    raise SystemExit(f"{item.get('slug', '')} 字幕二次模型审稿失败：{last_error}")
+
+
 def supervise_caption_breaks(settings, item):
-    hook, units = batch.build_spoken_units(item["text"])
+    hook, units, _min_cta_index = build_item_spoken_units(item)
+    if hide_cta_captions(settings):
+        apply_llm_cta_start_to_units(units, llm_cta_start_sentence_index(settings, item))
     caption_units = subtitle_units(units, settings)
     if not caption_units:
         return []
     initial_pages = auto_caption_pages(caption_units, settings)
-    unit_payload = [
-        {
-            "index": index,
-            "source": unit.get("source"),
-            "text": batch.display_line(unit["text"]),
-        }
-        for index, unit in enumerate(caption_units)
-    ]
+    unit_payload = caption_units_for_llm(caption_units)
     prompt = {
         "task": "审查并修正中文口播字幕换行",
         "rules": [
@@ -2800,8 +3341,8 @@ def supervise_caption_breaks(settings, item):
             "每个元素格式为 {\"start\":数字,\"end\":数字,\"lines\":[\"第一行\",\"第二行可省略\"]}。",
             "start/end 必须引用给定字幕单元 index，按顺序完整覆盖所有单元，不能重叠、不能跳过。",
             "每页最多两行；你要先像人一样读一遍，再判断断行是否顺口，不能只按固定分词。",
-            "每一行必须能在 1080x1920 竖屏中用 96 号字幕字完整显示，宁可拆成两行或拆成相邻两页，也不要输出超宽长行。",
-            "单行尽量 7-10 个中文字符，最长不要超过 12 个中文字符；遇到大家好我是北京特聘基层、专攻二型糖尿疒调理方向、可只要它和皿糖反复一起出现这类长行必须拆开。",
+            "每一行必须能在 1080x1920 竖屏中用当前字幕字号完整显示，宁可拆成两行或拆成相邻两页，也不要输出超宽长行。",
+            "每行硬性最多 10 个显示字；单行尽量 7-10 个中文字符；超过 10 个字必须强制拆成多行或相邻多页，遇到大家好我是北京特聘基层、专攻二型糖尿疒调理方向、可只要它和皿糖反复一起出现这类长行必须拆开。",
             "不能出现饭后高背/后、胰岛修/复、一吃/饭、糖尿/疒、二型糖尿/疒这类读起来别扭或把词拆碎的断法。",
             "不能改字、不能漏字、不能添加标点；每一行字幕结尾都不要带逗号、句号、问号、感叹号、顿号、分号、冒号等标点；可以把连续单元合成一页。",
             "显示替换已经执行：医显示为醫，药显示为藥，病显示为疒，血显示为皿。",
@@ -2813,18 +3354,21 @@ def supervise_caption_breaks(settings, item):
     if caption_single_line(settings):
         prompt["rules"][1] = "每个元素格式为 {\"start\":数字,\"end\":数字,\"lines\":[\"单行字幕\"]}。"
         prompt["rules"][3] = "单行字幕已开启：每页只能有一行 lines，不能输出第二行；如果太长就拆成相邻两页。"
-        prompt["rules"][5] = "单行尽量 7-10 个中文字符，最长不要超过 12 个中文字符；遇到长句必须拆成相邻单行字幕页。"
+        prompt["rules"][5] = "每行硬性最多 10 个显示字；单行尽量 7-10 个中文字符；超过 10 个字必须拆成相邻单行字幕页。"
     if hide_cta_captions(settings):
         prompt["rules"][-1] = "CTA 已按剪辑配置隐藏，给定字幕单元里不包含 CTA；不要自行补回评论区、留下需要、后台来找我等 CTA 字幕。"
-    messages = [
+    base_messages = [
         {
             "role": "system",
             "content": "你是短视频中文口播字幕审查员。你只输出合法 JSON。",
         },
         {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
     ]
+    messages = list(base_messages)
     last_issues = []
-    for attempt in range(1, 5):
+    semantic_failure_count = 0
+    last_objective_normalized = []
+    for attempt in range(1, 9):
         content = chat_completion(settings, messages)
         try:
             pages = extract_json(content)
@@ -2832,24 +3376,110 @@ def supervise_caption_breaks(settings, item):
         except Exception as exc:
             issues, normalized = [f"JSON 解析失败：{exc}"], []
         if not issues:
-            log_json("caption_review_ok", slug=item["slug"], pages=len(normalized), attempt=attempt)
-            return normalized
+            semantic_passed, semantic_issues = llm_review_caption_pages(settings, item, caption_units, normalized)
+            if semantic_passed:
+                log_json("caption_review_ok", slug=item["slug"], pages=len(normalized), attempt=attempt)
+                return normalized
+            issues = caption_review_issue_lines(semantic_issues)
+            semantic_failure_count += 1
+            last_issues = issues
+            if caption_single_line(settings) and semantic_failure_count >= 2:
+                log_json(
+                    "caption_review_semantic_limit_accept",
+                    slug=item["slug"],
+                    pages=len(normalized),
+                    attempt=attempt,
+                    issues=issues,
+                )
+                return normalized
+            messages = list(base_messages) + [
+                {"role": "assistant", "content": json.dumps(normalized, ensure_ascii=False)},
+                {
+                    "role": "user",
+                    "content": (
+                        "技术规则已经通过，但第二名模型审稿员认为这些页读起来还不够顺。\n"
+                        "请根据审稿意见重新输出完整 JSON 数组，不要只输出局部页。\n"
+                        "仍然必须完整覆盖所有字幕单元，不能改字、漏字、加字、加标点；每行最多 10 个显示字；行尾不要标点。\n"
+                        "当前字幕页：\n"
+                        + json.dumps(caption_pages_for_llm(normalized, caption_units), ensure_ascii=False)
+                        + "\n审稿意见：\n"
+                        + "\n".join(issues)
+                    ),
+                },
+            ]
+            continue
+        if caption_single_line(settings):
+            objective_issues, objective_normalized = objective_pages_for_hard_rules(caption_units, settings)
+            if not objective_issues:
+                last_objective_normalized = objective_normalized
+                semantic_passed, semantic_issues = llm_review_caption_pages(settings, item, caption_units, objective_normalized)
+                if semantic_passed:
+                    log_json(
+                        "caption_review_ok",
+                        slug=item["slug"],
+                        pages=len(objective_normalized),
+                        attempt=attempt,
+                        hard_rule_repair=True,
+                    )
+                    return objective_normalized
+                issues = caption_review_issue_lines(semantic_issues)
+                semantic_failure_count += 1
+                last_issues = issues
+                if semantic_failure_count >= 2:
+                    log_json(
+                        "caption_review_semantic_limit_accept",
+                        slug=item["slug"],
+                        pages=len(objective_normalized),
+                        attempt=attempt,
+                        hard_rule_repair=True,
+                        issues=issues,
+                    )
+                    return objective_normalized
+                messages = list(base_messages) + [
+                    {"role": "assistant", "content": json.dumps(objective_normalized, ensure_ascii=False)},
+                    {
+                        "role": "user",
+                        "content": (
+                            "程序已经把字幕整理成单行、完整覆盖、每行不超过10字的客观合格版本，"
+                            "但第二名模型审稿员认为阅读感还需要调整。\n"
+                            "请重新输出完整 JSON 数组；单行字幕模式下每页只能一行，不能输出第二行。\n"
+                            "仍然必须完整覆盖所有字幕单元，不能改字、漏字、加字、加标点；每行最多 10 个显示字；行尾不要标点。\n"
+                            "当前字幕页：\n"
+                            + json.dumps(caption_pages_for_llm(objective_normalized, caption_units), ensure_ascii=False)
+                            + "\n审稿意见：\n"
+                            + "\n".join(issues)
+                        ),
+                    },
+                ]
+                continue
         last_issues = issues
-        messages.append({"role": "assistant", "content": content})
         overflow_instruction = (
-            "如果问题里有“单行超宽”，必须把这一页拆成前后相邻的单行字幕页；不能拆成两行，也不能再次输出同样的长行。"
+            "如果问题里有“单行超宽”或“单行超过10字”，必须把这一页拆成前后相邻的单行字幕页；不能拆成两行，也不能再次输出同样的长行。"
             if caption_single_line(settings)
-            else "如果问题里有“单行超宽”，必须把那一行拆成两行，或者把这一页拆成前后相邻两页；不能再次输出同样的长行。"
+            else "如果问题里有“单行超宽”或“单行超过10字”，必须把那一行拆成每行不超过10字的两行，或者把这一页拆成前后相邻多页；不能再次输出同样的长行。"
         )
-        messages.append({
-            "role": "user",
-            "content": (
-                "上一次返回不合格，请只返回修正后的 JSON。\n"
-                f"{overflow_instruction}\n"
-                "修正后仍然不能改字、漏字、加标点，每行结尾也不能带标点。\n"
-                "问题：\n" + "\n".join(issues)
-            ),
-        })
+        messages = list(base_messages) + [
+            {"role": "assistant", "content": content},
+            {
+                "role": "user",
+                "content": (
+                    "上一次返回不合格，请只返回修正后的完整 JSON 数组。\n"
+                    f"{overflow_instruction}\n"
+                    "修正后仍然不能改字、漏字、加标点，每行结尾也不能带标点。\n"
+                    "问题：\n" + "\n".join(issues)
+                ),
+            },
+        ]
+    if caption_single_line(settings) and last_objective_normalized:
+        log_json(
+            "caption_review_semantic_limit_accept",
+            slug=item["slug"],
+            pages=len(last_objective_normalized),
+            attempt=8,
+            hard_rule_repair=True,
+            issues=last_issues,
+        )
+        return last_objective_normalized
     raise SystemExit(f"{item['slug']} 字幕换行模型审查失败：\n" + "\n".join(last_issues))
 
 
@@ -2867,8 +3497,8 @@ def write_reviewed_subtitles(item, timed_units, hook, pages, duration, ass_path,
     title_center_x, _ = box_center(title_box)
     caption_x, caption_y = box_center(caption_box)
     disclaimer_x, disclaimer_y = box_center(disclaimer_box)
-    title_base_size = int(round(bounded_number(title_box["h"] * 0.30, 144, 72, 180)))
-    caption_size = int(round(bounded_number(caption_box["h"] * 0.44, batch.CAPTION_FONT_SIZE, 48, 128)))
+    title_base_size = configured_title_font_size(settings, title_box["h"] * 0.30)
+    caption_size = configured_caption_font_size(settings)
     disclaimer_size = int(round(bounded_number(disclaimer_box["h"] * 0.29, 43, 24, 64)))
     title_font_fallback = settings.get("titleFontPath") or settings.get("titleTopFontPath")
     title_top_font = Path(settings.get("titleTopFontPath") or title_font_fallback)
@@ -2884,9 +3514,10 @@ def write_reviewed_subtitles(item, timed_units, hook, pages, duration, ass_path,
     title_middle_y = title_line_y(title_box, 0.49)
     title_top_y = title_middle_y - title_line_spacing
     title_bottom_y = title_middle_y + title_line_spacing
-    red_size = fit_font_size_for_path([red], title_top_font, title_base_size, batch.TITLE_MIN_FONT_SIZE, spacing=title_top_spacing)
-    yellow_size = fit_font_size_for_path([yellow], title_middle_font, title_base_size, batch.TITLE_MIN_FONT_SIZE, spacing=title_middle_spacing)
-    blue_size = fit_font_size_for_path([blue], title_bottom_font, int(round(title_base_size * 0.92)), batch.TITLE_MIN_FONT_SIZE, spacing=title_bottom_spacing)
+    title_min_size = min(batch.TITLE_MIN_FONT_SIZE, title_base_size)
+    red_size = fit_font_size_for_path([red], title_top_font, title_base_size, title_min_size, spacing=title_top_spacing)
+    yellow_size = fit_font_size_for_path([yellow], title_middle_font, title_base_size, title_min_size, spacing=title_middle_spacing)
+    blue_size = fit_font_size_for_path([blue], title_bottom_font, int(round(title_base_size * 0.92)), min(title_min_size, int(round(title_base_size * 0.92))), spacing=title_bottom_spacing)
     disclaimer_opacity = bounded_number(settings.get("disclaimerOpacityPercent"), 50, 0, 100)
     caption_spacing = style_spacing(settings, "captionLetterSpacing", 0)
 
@@ -3725,7 +4356,9 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
         opening_replaced = output_dir / f"{prefix}_opening_replaced_tmp.mp4"
 
         transcript = batch.load_or_transcribe(raw_video, transcript_path)
-        hook, units = batch.build_spoken_units(item["text"])
+        hook, units, _min_cta_index = build_item_spoken_units(item)
+        if hide_cta_captions(settings):
+            apply_llm_cta_start_to_units(units, llm_cta_start_sentence_index(settings, item))
         timed_units = batch.assign_timings(units, transcript)
         duration = batch.duration(raw_video)
         if apply_item_title_override(item, index, load_title_overrides(job)):
@@ -3757,6 +4390,7 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             "template_key": str(settings.get("activeTemplateKey", "")),
             "template_id": str(settings.get("activeTemplateId", "")),
             "template_name": str(settings.get("activeTemplateName", "")),
+            "llm_cta_start_sentence_index": item.get("_llm_cta_start_sentence_index", ""),
             "template_asset_index": str(settings.get("activeTemplateAssetIndex", "")),
             "chanjing_account_index": str(settings.get("chanjingAccountIndex", "")),
             "chanjing_asset_index": str(settings.get("chanjingAssetIndex", "")),
@@ -3967,8 +4601,11 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
         copied = unique_output_path(runtime["output_dir"] / final_output_filename(settings, final.suffix))
         shutil.copy2(final, copied)
         completed_at = time.time()
-        state["items"].setdefault(slug, {})["final_path"] = str(copied)
-        state["items"][slug]["processed_at"] = int(completed_at)
+        entry = state["items"].setdefault(slug, {})
+        entry["final_path"] = str(copied)
+        entry["processed_at"] = int(completed_at)
+        entry.pop("failed_at", None)
+        entry.pop("error", None)
         save_state(state_path, state)
         log_json(
             "item_done",
