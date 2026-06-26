@@ -92,6 +92,90 @@ def stable_text_hash(text):
     return hashlib.sha1(str(text).encode("utf-8")).hexdigest()
 
 
+CN_DIGITS = "零一二三四五六七八九"
+CN_UNITS = ("", "十", "百", "千")
+
+
+def chinese_digits(text):
+    return "".join(CN_DIGITS[int(char)] if char.isdigit() else char for char in str(text))
+
+
+def integer_to_chinese(value):
+    value = str(value)
+    if not value or not value.isdigit():
+        return value
+    number = int(value)
+    if number == 0:
+        return "零"
+    if number >= 10000:
+        high = number // 10000
+        low = number % 10000
+        result = f"{integer_to_chinese(high)}万"
+        if low:
+            result += ("零" if low < 1000 else "") + integer_to_chinese(str(low))
+        return result
+    result = []
+    zero_pending = False
+    digits = list(map(int, str(number)))
+    total = len(digits)
+    for index, digit in enumerate(digits):
+        unit_index = total - index - 1
+        if digit == 0:
+            zero_pending = bool(result)
+            continue
+        if zero_pending:
+            result.append("零")
+            zero_pending = False
+        if not (digit == 1 and unit_index == 1 and not result):
+            result.append(CN_DIGITS[digit])
+        result.append(CN_UNITS[unit_index])
+    return "".join(result)
+
+
+def speech_number_to_chinese(match):
+    token = match.group(0)
+    return number_token_to_chinese(token)
+
+
+def number_token_to_chinese(token):
+    token = str(token)
+    if "." in token:
+        integer, decimal = token.split(".", 1)
+        return f"{integer_to_chinese(integer)}点{chinese_digits(decimal)}"
+    if len(token) > 1 and token.startswith("0"):
+        return chinese_digits(token)
+    return integer_to_chinese(token)
+
+
+def speech_range_to_chinese(match):
+    left_token = match.group(1)
+    right_token = match.group(2)
+    if re.fullmatch(r"(?:19|20)\d{2}", left_token) and re.fullmatch(r"(?:19|20)\d{2}", right_token):
+        left = chinese_digits(left_token)
+        right = chinese_digits(right_token)
+    else:
+        left = number_token_to_chinese(left_token)
+        right = number_token_to_chinese(right_token)
+    return f"{left}到{right}"
+
+
+def speech_percent_to_chinese(match):
+    return f"百分之{number_token_to_chinese(match.group(1))}"
+
+
+def normalize_chanjing_speech_text(text):
+    value = str(text or "")
+    value = re.sub(r"(?<!\d)(\d+(?:\.\d+)?)\s*[-~～—–]\s*(\d+(?:\.\d+)?)(?!\d)", speech_range_to_chinese, value)
+    value = re.sub(r"(?<!\d)((?:19|20)\d{2})(?=年)", lambda m: chinese_digits(m.group(1)), value)
+    value = re.sub(r"(?<!\d)((?:19|20)\d{2})(?!\d)", lambda m: chinese_digits(m.group(1)), value)
+    value = re.sub(r"(?<=\d)\+(?=\d)", "加", value)
+    value = re.sub(r"(?<!\d)(\d+(?:\.\d+)?)\s*[%％]", speech_percent_to_chinese, value)
+    value = re.sub(r"\d+\.\d+", speech_number_to_chinese, value)
+    value = re.sub(r"(?<!\d)2(?=(个|种|次|天|年|月|个月|小时|分钟|分|秒|周|岁|遍|条|位|口|针|盒|颗|片|斤|瓶|包|支|倍|万|千|百))", "两", value)
+    value = re.sub(r"\d+", speech_number_to_chinese, value)
+    return value
+
+
 def normalize_title_lines(value):
     if isinstance(value, list):
         lines = value
@@ -4210,6 +4294,11 @@ def recover_entry_from_previous_runs(slug, item, state_path, requested_asset=Non
         previous_hash = entry.get("text_hash")
         if previous_hash != item["text_hash"]:
             continue
+        previous_speech_hash = entry.get("speech_text_hash")
+        if previous_speech_hash and previous_speech_hash != item.get("speech_text_hash"):
+            continue
+        if not previous_speech_hash and item.get("speech_text_hash") != item["text_hash"]:
+            continue
         if requested_asset and not same_chanjing_asset(entry.get("asset"), requested_asset):
             continue
         task_id = str(entry["task_id"])
@@ -4231,9 +4320,11 @@ def recover_entry_from_previous_runs(slug, item, state_path, requested_asset=Non
                 "queue_status",
                 "video_url",
                 "completed_at",
+                "speech_text_hash",
             }
         }
         recovered["text_hash"] = item["text_hash"]
+        recovered["speech_text_hash"] = item.get("speech_text_hash")
         recovered["recovered_from_state"] = str(path)
         return recovered
 
@@ -4250,6 +4341,9 @@ def is_chanjing_token_expired_error(error):
 
 def ensure_raw_video(item, index, assets, state_path, state, settings, force_fresh=False):
     slug = item["slug"]
+    speech_text = normalize_chanjing_speech_text(item["text"])
+    item["speech_text"] = speech_text
+    item["speech_text_hash"] = stable_text_hash(speech_text)
     entry = state["items"].setdefault(slug, {})
     requested_asset = selected_chanjing_asset(settings, assets)
     if requested_asset:
@@ -4258,12 +4352,17 @@ def ensure_raw_video(item, index, assets, state_path, state, settings, force_fre
         entry = {}
         state["items"][slug] = entry
     stored_hash = entry.get("text_hash")
-    if entry.get("task_id") and stored_hash != item["text_hash"]:
-        reason = "changed" if stored_hash else "unverified"
+    stored_speech_hash = entry.get("speech_text_hash")
+    speech_hash_changed = stored_speech_hash != item["speech_text_hash"]
+    if not stored_speech_hash and item["speech_text_hash"] == item["text_hash"]:
+        speech_hash_changed = False
+    if entry.get("task_id") and (stored_hash != item["text_hash"] or speech_hash_changed):
+        reason = "speech_changed" if stored_hash == item["text_hash"] else ("changed" if stored_hash else "unverified")
         log_json("state_text_changed", slug=slug, reason=reason)
         entry = {}
         state["items"][slug] = entry
     entry["text_hash"] = item["text_hash"]
+    entry["speech_text_hash"] = item["speech_text_hash"]
     task_id = entry.get("task_id")
     if requested_asset and task_id and not same_chanjing_asset(entry.get("asset"), requested_asset):
         log_json(
@@ -4272,7 +4371,7 @@ def ensure_raw_video(item, index, assets, state_path, state, settings, force_fre
             from_asset=(entry.get("asset") or {}).get("name", ""),
             to_asset=requested_asset.get("name", ""),
         )
-        entry = {"text_hash": item["text_hash"]}
+        entry = {"text_hash": item["text_hash"], "speech_text_hash": item["speech_text_hash"]}
         state["items"][slug] = entry
         task_id = None
     asset = requested_asset or (None if force_fresh else entry.get("asset")) or assets[(index - 1) % len(assets)]
@@ -4284,7 +4383,7 @@ def ensure_raw_video(item, index, assets, state_path, state, settings, force_fre
             from_audio=(entry.get("asset") or {}).get("audio_man_id", ""),
             to_audio=asset.get("audio_man_id", ""),
         )
-        entry = {"text_hash": item["text_hash"]}
+        entry = {"text_hash": item["text_hash"], "speech_text_hash": item["speech_text_hash"]}
         state["items"][slug] = entry
         task_id = None
     entry["asset"] = asset
@@ -4326,8 +4425,10 @@ def ensure_raw_video(item, index, assets, state_path, state, settings, force_fre
                 audio_man_id=asset.get("audio_man_id"),
                 audio_source_name=asset.get("audio_source_name"),
             )
+        if speech_text != item["text"]:
+            log_json("chanjing_speech_normalized", slug=slug)
         log_json("chanjing_create", slug=slug, index=index)
-        task_id = batch.create_video(token, asset, item["text"])
+        task_id = batch.create_video(token, asset, speech_text)
         entry["task_id"] = task_id
         entry["created_at"] = int(time.time())
         save_state(state_path, state)
