@@ -3711,7 +3711,33 @@ def supervise_caption_breaks(settings, item):
     raise SystemExit(f"{item['slug']} 字幕换行模型审查失败：\n" + "\n".join(last_issues))
 
 
-def write_reviewed_subtitles(item, timed_units, hook, pages, duration, ass_path, srt_path, settings, hidden_caption_lines=None):
+def horizontal_opening_foreground_height(horizontal_aspect_mode):
+    return 608 if horizontal_aspect_mode == "16_9" else 810
+
+
+def horizontal_opening_title_positions(title_line_spacing, horizontal_aspect_mode):
+    foreground_height = horizontal_opening_foreground_height(horizontal_aspect_mode)
+    foreground_top = (1920 - foreground_height) / 2
+    foreground_bottom = foreground_top + foreground_height
+    top_y = int(round(max(120, foreground_top - title_line_spacing * 1.45)))
+    middle_y = int(round(max(top_y + 80, foreground_top - title_line_spacing * 0.55)))
+    bottom_y = int(round(min(1800, foreground_bottom + title_line_spacing * 0.95)))
+    return top_y, middle_y, bottom_y
+
+
+def write_reviewed_subtitles(
+    item,
+    timed_units,
+    hook,
+    pages,
+    duration,
+    ass_path,
+    srt_path,
+    settings,
+    hidden_caption_lines=None,
+    opening_fit_mode="",
+    opening_horizontal_aspect_mode_value="4_3",
+):
     hidden_caption_lines = set(hidden_caption_lines or [])
     title_end = batch.title_end_for_units(timed_units)
     show_title = clip_enabled(settings, "clipTitle", True)
@@ -3742,6 +3768,12 @@ def write_reviewed_subtitles(item, timed_units, hook, pages, duration, ass_path,
     title_middle_y = title_line_y(title_box, 0.49)
     title_top_y = title_middle_y - title_line_spacing
     title_bottom_y = title_middle_y + title_line_spacing
+    title_layout_mode = "horizontal_split" if opening_fit_mode == "contain_blur" else "template"
+    if title_layout_mode == "horizontal_split":
+        title_top_y, title_middle_y, title_bottom_y = horizontal_opening_title_positions(
+            title_line_spacing,
+            opening_horizontal_aspect_mode_value,
+        )
     title_min_size = min(batch.TITLE_MIN_FONT_SIZE, title_base_size)
     red_size = fit_font_size_for_path([red], title_top_font, title_base_size, title_min_size, spacing=title_top_spacing)
     yellow_size = fit_font_size_for_path([yellow], title_middle_font, title_base_size, title_min_size, spacing=title_middle_spacing)
@@ -4789,6 +4821,15 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
                 skipped_by=skipped.get("skipped_by"),
             )
 
+        opening_video = None
+        opening_mode = ""
+        opening_fit_mode = ""
+        opening_fit_info = {}
+        opening_horizontal_mode = opening_horizontal_aspect_mode(settings)
+        if selected_title_motion:
+            opening_video, opening_mode = choose_opening_video(settings)
+            opening_fit_mode, opening_fit_info = opening_video_fit_mode(opening_video)
+
         write_reviewed_subtitles(
             item,
             timed_units,
@@ -4799,12 +4840,11 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             srt_path,
             settings,
             hidden_caption_lines=hidden_caption_lines,
+            opening_fit_mode=opening_fit_mode,
+            opening_horizontal_aspect_mode_value=opening_horizontal_mode,
         )
 
         if selected_title_motion:
-            opening_video, opening_mode = choose_opening_video(settings)
-            opening_fit_mode, opening_fit_info = opening_video_fit_mode(opening_video)
-            opening_horizontal_mode = opening_horizontal_aspect_mode(settings)
             replaced_seconds = replace_opening_visual(
                 raw_video,
                 opening_video,
@@ -4822,6 +4862,7 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
                 "opening_video_width": str(opening_fit_info.get("width", "")),
                 "opening_video_height": str(opening_fit_info.get("height", "")),
                 "opening_video_ratio": str(opening_fit_info.get("ratio", "")),
+                "opening_title_layout": "horizontal_split" if opening_fit_mode == "contain_blur" else "template",
                 "opening_video": str(opening_video),
                 "opening_replace_seconds": f"{replaced_seconds:.3f}",
             })
@@ -4832,6 +4873,7 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
                 mode=opening_mode,
                 fit_mode=opening_fit_mode,
                 horizontal_aspect_mode=opening_horizontal_mode if opening_fit_mode == "contain_blur" else "",
+                title_layout="horizontal_split" if opening_fit_mode == "contain_blur" else "template",
                 fit_info=opening_fit_info,
                 opening_video=str(opening_video),
                 replace_seconds=round(replaced_seconds, 3),
