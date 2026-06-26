@@ -5,6 +5,7 @@ import base64
 import hashlib
 import html
 import json
+import math
 import os
 import random
 import re
@@ -2552,24 +2553,88 @@ def overlay_remotion_effects_at_offset(base_path, effect_layer_path, output_path
     ], check=True)
 
 
-def replace_opening_visual(input_path, opening_video, output_path, replace_seconds):
+def video_dimensions(path):
+    try:
+        result = subprocess.run([
+            "ffprobe",
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "json",
+            str(path),
+        ], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        streams = json.loads(result.stdout or "{}").get("streams") or []
+        if not streams:
+            return None
+        width = int(streams[0].get("width") or 0)
+        height = int(streams[0].get("height") or 0)
+        if width > 0 and height > 0:
+            return width, height
+    except Exception as exc:
+        log_json("opening_video_probe_failed", path=str(path), error=str(exc))
+    return None
+
+
+def opening_video_fit_mode(opening_video):
+    dimensions = video_dimensions(opening_video)
+    if not dimensions:
+        return "cover", {"fit_reason": "probe_failed"}
+    width, height = dimensions
+    ratio = width / height
+    targets = {
+        "vertical_9_16": 9 / 16,
+        "horizontal_16_9": 16 / 9,
+        "horizontal_4_3": 4 / 3,
+    }
+    distances = {
+        name: abs(math.log(max(ratio, 0.001) / target))
+        for name, target in targets.items()
+    }
+    horizontal_distance = min(distances["horizontal_16_9"], distances["horizontal_4_3"])
+    mode = "cover" if distances["vertical_9_16"] <= horizontal_distance else "contain_blur"
+    return mode, {
+        "width": width,
+        "height": height,
+        "ratio": f"{ratio:.4f}",
+        "fit_reason": "closer_to_vertical" if mode == "cover" else "closer_to_horizontal_or_4_3",
+    }
+
+
+def opening_video_filter(source_label, output_label, duration, fit_mode):
+    if fit_mode == "contain_blur":
+        bg_label = f"{output_label}bg"
+        fg_label = f"{output_label}fg"
+        return (
+            f"[{source_label}]trim=start=0:duration={duration:.3f},setpts=PTS-STARTPTS,"
+            f"split=2[{bg_label}src][{fg_label}src];"
+            f"[{bg_label}src]scale=1080:1920:force_original_aspect_ratio=increase,"
+            f"crop=1080:1920,gblur=sigma=36:steps=2,"
+            f"eq=brightness=-0.04:saturation=1.08,setsar=1,fps=25[{bg_label}];"
+            f"[{fg_label}src]scale=1080:1920:force_original_aspect_ratio=decrease,"
+            f"setsar=1,fps=25[{fg_label}];"
+            f"[{bg_label}][{fg_label}]overlay=(W-w)/2:(H-h)/2:format=auto,"
+            f"setsar=1,fps=25[{output_label}]"
+        )
+    return (
+        f"[{source_label}]trim=start=0:duration={duration:.3f},setpts=PTS-STARTPTS,"
+        f"scale=1080:1920:force_original_aspect_ratio=increase,"
+        f"crop=1080:1920,setsar=1,fps=25[{output_label}]"
+    )
+
+
+def replace_opening_visual(input_path, opening_video, output_path, replace_seconds, fit_mode="cover"):
     total = batch.duration(input_path)
     replace_seconds = max(0.0, min(float(replace_seconds or 0.0), total))
     if replace_seconds <= 0.05:
         shutil.copy2(input_path, output_path)
         return 0.0
 
-    fit_open = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=25"
     fit_body = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=25"
     if replace_seconds >= total - 0.05:
-        filter_complex = (
-            f"[1:v]trim=start=0:duration={total:.3f},setpts=PTS-STARTPTS,"
-            f"{fit_open}[v]"
-        )
+        filter_complex = opening_video_filter("1:v", "v", total, fit_mode)
     else:
         filter_complex = (
-            f"[1:v]trim=start=0:duration={replace_seconds:.3f},setpts=PTS-STARTPTS,"
-            f"{fit_open}[openv];"
+            f"{opening_video_filter('1:v', 'openv', replace_seconds, fit_mode)};"
             f"[0:v]trim=start={replace_seconds:.3f}:end={total:.3f},setpts=PTS-STARTPTS,"
             f"{fit_body}[bodyv];"
             "[openv][bodyv]concat=n=2:v=1:a=0[v]"
@@ -4721,10 +4786,16 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
 
         if selected_title_motion:
             opening_video, opening_mode = choose_opening_video(settings)
-            replaced_seconds = replace_opening_visual(raw_video, opening_video, opening_replaced, title_end)
+            opening_fit_mode, opening_fit_info = opening_video_fit_mode(opening_video)
+            replaced_seconds = replace_opening_visual(raw_video, opening_video, opening_replaced, title_end, opening_fit_mode)
             source_for_packaging = opening_replaced
             report_extra.update({
                 "opening_video_mode": opening_mode,
+                "opening_video_fit_mode": opening_fit_mode,
+                "opening_video_fit_reason": opening_fit_info.get("fit_reason", ""),
+                "opening_video_width": str(opening_fit_info.get("width", "")),
+                "opening_video_height": str(opening_fit_info.get("height", "")),
+                "opening_video_ratio": str(opening_fit_info.get("ratio", "")),
                 "opening_video": str(opening_video),
                 "opening_replace_seconds": f"{replaced_seconds:.3f}",
             })
@@ -4733,6 +4804,8 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
                 index=index,
                 slug=slug,
                 mode=opening_mode,
+                fit_mode=opening_fit_mode,
+                fit_info=opening_fit_info,
                 opening_video=str(opening_video),
                 replace_seconds=round(replaced_seconds, 3),
             )
