@@ -2659,6 +2659,57 @@ def extract_json(text):
     return parsed
 
 
+CTA_LOCAL_TAIL_SENTENCE_COUNT = 6
+CTA_LOCAL_INTERACTION_TERMS = (
+    "点击卡片",
+    "点卡片",
+    "点击头像",
+    "点头像",
+    "点击右侧头像",
+    "点右侧头像",
+    "右侧头像",
+    "点击右边头像",
+    "点右边头像",
+    "右边头像",
+    "到主页",
+    "主页找我",
+    "后台找我",
+    "后台来找我",
+    "来找我",
+    "找我聊聊",
+    "和我聊聊",
+    "跟我聊聊",
+    "私信我",
+    "联系我",
+    "和我打招呼",
+    "跟我打招呼",
+    "打个招呼",
+    "来打个招呼",
+    "评论区",
+    "评论",
+    "留言",
+    "回复",
+    "留下需要",
+    "留下支持",
+    "留下评论",
+)
+
+
+def normalize_cta_match_text(text):
+    return re.sub(r"[\s，,。！？!?；;：:“”\"'、（）()《》〈〉【】\[\]{}…—\-·]+", "", str(text or ""))
+
+
+def local_cta_start_sentence_index(sentences, min_cta_index):
+    if not sentences or len(sentences) <= min_cta_index:
+        return None
+    start = max(min_cta_index, len(sentences) - CTA_LOCAL_TAIL_SENTENCE_COUNT)
+    for index in range(start, len(sentences)):
+        clean = normalize_cta_match_text(sentences[index])
+        if any(term in clean for term in CTA_LOCAL_INTERACTION_TERMS):
+            return index
+    return None
+
+
 def llm_cta_start_sentence_index(settings, item):
     if not hide_cta_captions(settings):
         return None
@@ -2670,6 +2721,16 @@ def llm_cta_start_sentence_index(settings, item):
     if len(sentences) <= min_cta_index:
         item[cache_key] = None
         return None
+    local_start = local_cta_start_sentence_index(sentences, min_cta_index)
+    if local_start is not None:
+        item[cache_key] = local_start
+        log_json(
+            "cta_local_match",
+            slug=item.get("slug", ""),
+            cta_start=local_start,
+            sentence=sentences[local_start],
+        )
+        return local_start
     payload = [
         {
             "index": index,
@@ -2684,7 +2745,8 @@ def llm_cta_start_sentence_index(settings, item):
             "只返回 JSON 对象，不要解释。",
             "返回格式：{\"cta_start\":数字或null,\"reason\":\"简短原因\"}。",
             f"index 从 0 开始；小于 {min_cta_index} 的句子不能作为 CTA 起点。",
-            "CTA 指引导观众关注、评论、留言、私信、点击头像、到主页、后台找我、留下需要/支持/问题/情况、提交血糖用药信息等互动或转化句。",
+            "CTA 指引导观众关注、评论、留言、私信、点击头像、点击右侧头像、点击卡片、到主页、后台找我、和我聊聊、和我打招呼、打个招呼、留下需要/支持/评论/问题/情况、提交血糖用药信息等互动或转化句。",
+            "最后几句里只要出现和观众互动、引导点击或引导联系的表达，通常都算 CTA，例如点击卡片、点击头像、点击右侧头像、和我聊聊、跟我聊聊、和我打招呼、打个招呼。",
             "从你判断的第一句 CTA 开始，后面所有句子都会被软件隐藏字幕；所以不要把普通科普、身份背书、风险提醒、别停药别乱改这类正文误判为 CTA。",
             "如果没有明确 CTA，cta_start 返回 null。",
         ],
