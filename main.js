@@ -171,6 +171,7 @@ function defaultSettings() {
     openingVideoFile: '',
     openingVideoLibrary: [],
     useOpeningVideoFile: false,
+    openingHorizontalAspectMode: '4_3',
     titleMotionPriority: 5,
     pipFolder: path.join(bundlePath, 'assets', 'pip'),
     pipMaterialLibrary: [],

@@ -2600,7 +2600,25 @@ def opening_video_fit_mode(opening_video):
     }
 
 
-def opening_video_filter(source_label, output_label, duration, fit_mode):
+def opening_horizontal_aspect_mode(settings):
+    mode = str((settings or {}).get("openingHorizontalAspectMode") or "4_3").strip().lower()
+    normalized = mode.replace(":", "_").replace("-", "_")
+    return normalized if normalized in {"16_9", "4_3"} else "4_3"
+
+
+def opening_video_foreground_filter(source_label, output_label, aspect_mode):
+    if aspect_mode == "16_9":
+        return (
+            f"[{source_label}]scale=1080:608:force_original_aspect_ratio=increase,"
+            f"crop=1080:608,setsar=1,fps=25[{output_label}]"
+        )
+    return (
+        f"[{source_label}]scale=1080:810:force_original_aspect_ratio=increase,"
+        f"crop=1080:810,setsar=1,fps=25[{output_label}]"
+    )
+
+
+def opening_video_filter(source_label, output_label, duration, fit_mode, horizontal_aspect_mode="4_3"):
     if fit_mode == "contain_blur":
         bg_label = f"{output_label}bg"
         fg_label = f"{output_label}fg"
@@ -2610,8 +2628,7 @@ def opening_video_filter(source_label, output_label, duration, fit_mode):
             f"[{bg_label}src]scale=1080:1920:force_original_aspect_ratio=increase,"
             f"crop=1080:1920,gblur=sigma=36:steps=2,"
             f"eq=brightness=-0.04:saturation=1.08,setsar=1,fps=25[{bg_label}];"
-            f"[{fg_label}src]scale=1080:1920:force_original_aspect_ratio=decrease,"
-            f"setsar=1,fps=25[{fg_label}];"
+            f"{opening_video_foreground_filter(f'{fg_label}src', fg_label, horizontal_aspect_mode)};"
             f"[{bg_label}][{fg_label}]overlay=(W-w)/2:(H-h)/2:format=auto,"
             f"setsar=1,fps=25[{output_label}]"
         )
@@ -2622,7 +2639,7 @@ def opening_video_filter(source_label, output_label, duration, fit_mode):
     )
 
 
-def replace_opening_visual(input_path, opening_video, output_path, replace_seconds, fit_mode="cover"):
+def replace_opening_visual(input_path, opening_video, output_path, replace_seconds, fit_mode="cover", horizontal_aspect_mode="4_3"):
     total = batch.duration(input_path)
     replace_seconds = max(0.0, min(float(replace_seconds or 0.0), total))
     if replace_seconds <= 0.05:
@@ -2631,10 +2648,10 @@ def replace_opening_visual(input_path, opening_video, output_path, replace_secon
 
     fit_body = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=25"
     if replace_seconds >= total - 0.05:
-        filter_complex = opening_video_filter("1:v", "v", total, fit_mode)
+        filter_complex = opening_video_filter("1:v", "v", total, fit_mode, horizontal_aspect_mode)
     else:
         filter_complex = (
-            f"{opening_video_filter('1:v', 'openv', replace_seconds, fit_mode)};"
+            f"{opening_video_filter('1:v', 'openv', replace_seconds, fit_mode, horizontal_aspect_mode)};"
             f"[0:v]trim=start={replace_seconds:.3f}:end={total:.3f},setpts=PTS-STARTPTS,"
             f"{fit_body}[bodyv];"
             "[openv][bodyv]concat=n=2:v=1:a=0[v]"
@@ -4787,11 +4804,20 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
         if selected_title_motion:
             opening_video, opening_mode = choose_opening_video(settings)
             opening_fit_mode, opening_fit_info = opening_video_fit_mode(opening_video)
-            replaced_seconds = replace_opening_visual(raw_video, opening_video, opening_replaced, title_end, opening_fit_mode)
+            opening_horizontal_mode = opening_horizontal_aspect_mode(settings)
+            replaced_seconds = replace_opening_visual(
+                raw_video,
+                opening_video,
+                opening_replaced,
+                title_end,
+                opening_fit_mode,
+                opening_horizontal_mode,
+            )
             source_for_packaging = opening_replaced
             report_extra.update({
                 "opening_video_mode": opening_mode,
                 "opening_video_fit_mode": opening_fit_mode,
+                "opening_horizontal_aspect_mode": opening_horizontal_mode if opening_fit_mode == "contain_blur" else "",
                 "opening_video_fit_reason": opening_fit_info.get("fit_reason", ""),
                 "opening_video_width": str(opening_fit_info.get("width", "")),
                 "opening_video_height": str(opening_fit_info.get("height", "")),
@@ -4805,6 +4831,7 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
                 slug=slug,
                 mode=opening_mode,
                 fit_mode=opening_fit_mode,
+                horizontal_aspect_mode=opening_horizontal_mode if opening_fit_mode == "contain_blur" else "",
                 fit_info=opening_fit_info,
                 opening_video=str(opening_video),
                 replace_seconds=round(replaced_seconds, 3),
