@@ -941,6 +941,14 @@
                   <input id="silenceMiddleKeepSeconds" type="number" readonly />
                 </div>
               </div>
+              <div class="field">
+                <label class="inline-check standalone"><input id="videoSpeedEnabled" type="checkbox" /><span>启用最终倍速</span></label>
+                <p class="hint">倍速会在剪辑气口之后、添加 BGM 和音效之前执行，所以数字人声音会变速，BGM/音效不会被变速。</p>
+              </div>
+              <div class="field">
+                <label>倍速倍率</label>
+                <input id="videoSpeedRate" type="number" min="0.5" max="2" step="0.05" />
+              </div>
             </div>
           </div>
         </section>

@@ -106,6 +106,8 @@ const fields = [
   'captionLetterSpacing',
   'captionSingleLine',
   'captionBufferSeconds',
+  'videoSpeedEnabled',
+  'videoSpeedRate',
   'disableSilenceTrim',
   'trimSilenceEnabled',
   'silenceMinSeconds',
@@ -1505,6 +1507,7 @@ function collectSettings() {
     next[field] = true;
   });
   Object.assign(next, normalizeSilenceTrimSettings(next));
+  Object.assign(next, normalizeVideoSpeedSettings(next));
   next.pipX = Number(next.previewPipX || next.pipX || previewDefaults.pip.x);
   next.pipY = Number(next.previewPipY || next.pipY || previewDefaults.pip.y);
   next.pipHeight = Number(next.previewPipH || next.pipHeight || previewDefaults.pip.h);
@@ -1542,6 +1545,7 @@ function fillSettings(value) {
   settings.openingVideoLibrary = normalizeMediaLibraryForKind('openingVideo', settings.openingVideoLibrary);
   settings.pipMaterialLibrary = normalizeMediaLibraryForKind('pipMaterial', settings.pipMaterialLibrary);
   Object.assign(settings, normalizeSilenceTrimSettings(settings));
+  Object.assign(settings, normalizeVideoSpeedSettings(settings));
   settings.accountTemplates = migrateLegacyAccountTemplates(settings.accountTemplates, settings.accountAssetTemplates);
   const accountTotal = settings.chanjingAccounts.length;
   const legacySelectionMode = String(settings.assetSelectionMode || '').trim().toLowerCase();
@@ -1631,6 +1635,7 @@ function fillSettings(value) {
     }
   }
   syncSilenceTrimFields();
+  syncVideoSpeedFields();
   document.querySelectorAll('[data-text-effect-id]').forEach((el) => {
     el.checked = selectedTextEffects.includes(el.dataset.textEffectId);
   });
@@ -1709,6 +1714,14 @@ function normalizeSilenceTrimSettings(source = {}) {
   };
 }
 
+function normalizeVideoSpeedSettings(source = {}) {
+  const rate = clampNumber(Number(source.videoSpeedRate || 1.15), 0.5, 2);
+  return {
+    videoSpeedEnabled: Boolean(source.videoSpeedEnabled),
+    videoSpeedRate: Number(rate.toFixed(3))
+  };
+}
+
 function syncSilenceTrimFields() {
   const disabled = Boolean($('disableSilenceTrim')?.checked);
   const enabled = !disabled && Boolean($('trimSilenceEnabled')?.checked);
@@ -1729,6 +1742,18 @@ function syncSilenceTrimFields() {
     const el = $(id);
     if (el) el.disabled = !enabled;
   });
+}
+
+function syncVideoSpeedFields() {
+  const normalized = normalizeVideoSpeedSettings({
+    videoSpeedEnabled: $('videoSpeedEnabled')?.checked,
+    videoSpeedRate: $('videoSpeedRate')?.value || settings.videoSpeedRate
+  });
+  const rateInput = $('videoSpeedRate');
+  if (rateInput) {
+    rateInput.value = String(normalized.videoSpeedRate);
+    rateInput.disabled = !normalized.videoSpeedEnabled;
+  }
 }
 
 function getPreviewBox(kind) {
@@ -5333,6 +5358,10 @@ async function init() {
   ['disableSilenceTrim', 'trimSilenceEnabled', 'silenceMinSeconds', 'silenceKeepBufferSeconds'].forEach((id) => {
     const eventName = id === 'silenceMinSeconds' || id === 'silenceKeepBufferSeconds' ? 'input' : 'change';
     $(id)?.addEventListener(eventName, syncSilenceTrimFields);
+  });
+
+  ['videoSpeedEnabled', 'videoSpeedRate'].forEach((id) => {
+    $(id)?.addEventListener('change', syncVideoSpeedFields);
   });
 
   [

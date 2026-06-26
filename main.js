@@ -204,6 +204,8 @@ function defaultSettings() {
     captionLetterSpacing: 0,
     captionSingleLine: false,
     captionBufferSeconds: 0.12,
+    videoSpeedEnabled: false,
+    videoSpeedRate: 1.15,
     disableSilenceTrim: false,
     trimSilenceEnabled: true,
     silenceMinSeconds: 0.18,

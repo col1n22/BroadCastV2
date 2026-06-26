@@ -3739,6 +3739,40 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return title_end
 
 
+def video_speed_rate(settings):
+    return bounded_number((settings or {}).get("videoSpeedRate"), 1.15, 0.5, 2.0)
+
+
+def video_speed_enabled(settings):
+    rate = video_speed_rate(settings)
+    return bool_setting((settings or {}).get("videoSpeedEnabled")) and abs(rate - 1.0) > 0.001
+
+
+def render_speed_adjusted(input_path, output_path, rate):
+    rate = bounded_number(rate, 1.15, 0.5, 2.0)
+    subprocess.run([
+        "ffmpeg", "-y",
+        "-i", str(input_path),
+        "-filter_complex",
+        (
+            f"[0:v]setpts=(PTS-STARTPTS)/{rate:.6f}[v];"
+            f"[0:a]asetpts=PTS-STARTPTS,atempo={rate:.6f},aresample=48000[a]"
+        ),
+        "-map", "[v]",
+        "-map", "[a]",
+        "-r", "25",
+        "-fps_mode", "cfr",
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", "18",
+        "-c:a", "aac",
+        "-b:a", "160k",
+        "-movflags", "+faststart",
+        "-video_track_timescale", "12800",
+        str(output_path),
+    ], check=True)
+
+
 def tighten_and_mix_selected_bgm(
     input_path,
     final_path,
@@ -3780,16 +3814,28 @@ def tighten_and_mix_selected_bgm(
         cuts = []
         keep = [(0.0, total)]
         shutil.copy2(input_path, no_bgm)
+    tight_total_before_speed = batch.duration(no_bgm)
     bgm_start_mode = str(bgm_start_mode or "after_title").strip()
     if bgm_start_mode not in {"full", "after_title"}:
         bgm_start_mode = "after_title"
     bgm_start_original = 0.0 if bgm_start_mode == "full" else title_end
-    bgm_start = 0.0 if bgm_start_mode == "full" else batch.map_original_to_tight(title_end, keep)
+    bgm_start_tight = 0.0 if bgm_start_mode == "full" else batch.map_original_to_tight(title_end, keep)
     sfx_starts_tight = [
         batch.map_original_to_tight(start, keep)
         for start in sfx_starts_original
         if 0.0 <= start <= total + 0.1
     ]
+    speed_rate = video_speed_rate(settings)
+    speed_enabled = video_speed_enabled(settings)
+    mix_input = no_bgm
+    if speed_enabled:
+        speed_no_bgm = final_path.with_name(final_path.stem + "_speed_no_bgm_tmp.mp4")
+        render_speed_adjusted(no_bgm, speed_no_bgm, speed_rate)
+        mix_input = speed_no_bgm
+    speed_divisor = speed_rate if speed_enabled else 1.0
+    duration_before_bgm = batch.duration(mix_input)
+    bgm_start = 0.0 if bgm_start_mode == "full" else bgm_start_tight / speed_divisor
+    sfx_starts_final = [start / speed_divisor for start in sfx_starts_tight]
     bgm_volume = volume_percent_to_gain(settings, "bgmVolumePercent", 22)
     sfx_volume = volume_percent_to_gain(settings, "sfxVolumePercent", 85)
     previous_bgm_volume = getattr(batch, "BGM_VOLUME", None)
@@ -3801,12 +3847,12 @@ def tighten_and_mix_selected_bgm(
     if bgm_enabled and bgm_file:
         try:
             batch.add_bgm(
-                no_bgm,
+                mix_input,
                 final_path,
                 bgm_start,
                 Path(bgm_file),
-                keyword_sfx_path=Path(sfx_file) if sfx_file and sfx_starts_tight and sfx_volume > 0 else None,
-                keyword_sfx_starts=sfx_starts_tight if sfx_volume > 0 else [],
+                keyword_sfx_path=Path(sfx_file) if sfx_file and sfx_starts_final and sfx_volume > 0 else None,
+                keyword_sfx_starts=sfx_starts_final if sfx_volume > 0 else [],
             )
         finally:
             if previous_bgm_volume is not None:
@@ -3815,7 +3861,7 @@ def tighten_and_mix_selected_bgm(
                 batch.KEYWORD_SFX_VOLUME = previous_sfx_volume
     else:
         try:
-            shutil.copy2(no_bgm, final_path)
+            shutil.copy2(mix_input, final_path)
         finally:
             if previous_bgm_volume is not None:
                 batch.BGM_VOLUME = previous_bgm_volume
@@ -3828,22 +3874,29 @@ def tighten_and_mix_selected_bgm(
         f"original_duration={total:.3f}",
         f"tight_duration={new_total:.3f}",
         f"removed={total - new_total:.3f}",
+        f"silence_removed={total - tight_total_before_speed:.3f}",
         f"trim_silence_enabled={trim_silence_enabled}",
         f"silence_min_seconds={silence_min_seconds:.3f}",
         f"silence_keep_buffer_seconds={silence_keep_buffer:.3f}",
         f"silence_middle_keep_seconds={silence_keep_buffer * 2:.3f}",
         f"silence_count={len(silences)}",
         f"cut_count={len(cuts)}",
+        f"video_speed_enabled={speed_enabled}",
+        f"video_speed_rate={speed_rate:.3f}",
+        f"tight_duration_before_speed={tight_total_before_speed:.3f}",
+        f"duration_before_bgm={duration_before_bgm:.3f}",
         f"bgm_enabled={bool(bgm_enabled and bgm_file)}",
         f"bgm={bgm_file or ''}",
         f"bgm_volume_percent={bgm_volume * 100:.0f}",
         f"bgm_start_mode={bgm_start_mode}",
         f"bgm_start_original={bgm_start_original:.3f}",
-        f"bgm_start_tight={bgm_start:.3f}",
+        f"bgm_start_tight={bgm_start_tight:.3f}",
+        f"bgm_start_final={bgm_start:.3f}",
         f"text_effect_sfx={sfx_file or ''}",
         f"text_effect_sfx_volume_percent={sfx_volume * 100:.0f}",
         "text_effect_sfx_starts_original=" + ",".join(f"{start:.3f}" for start in sfx_starts_original),
         "text_effect_sfx_starts_tight=" + ",".join(f"{start:.3f}" for start in sfx_starts_tight),
+        "text_effect_sfx_starts_final=" + ",".join(f"{start:.3f}" for start in sfx_starts_final),
     ]
     for key, value in (report_extra or {}).items():
         report.append(f"{key}={value}")
