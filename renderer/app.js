@@ -955,7 +955,17 @@ function templateConfigFrom(value) {
   const source = value && typeof value === 'object' && !Array.isArray(value)
     ? (value.config && typeof value.config === 'object' ? value.config : value)
     : {};
-  return captureTemplate(source);
+  const config = captureTemplate(source);
+  if (config.textEffectColor === undefined && source.captionColor !== undefined) {
+    config.textEffectColor = cloneTemplateValue(source.captionColor);
+  }
+  if (config.textEffectOutlineColor === undefined && source.captionOutlineColor !== undefined) {
+    config.textEffectOutlineColor = cloneTemplateValue(source.captionOutlineColor);
+  }
+  if (config.textEffectOutlineSize === undefined && source.captionOutlineSize !== undefined) {
+    config.textEffectOutlineSize = cloneTemplateValue(source.captionOutlineSize);
+  }
+  return config;
 }
 
 function normalizeTemplateDefinition(value, accountIndex, position) {

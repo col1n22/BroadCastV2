@@ -4194,12 +4194,20 @@ def template_config(value):
         return {}
     config = value.get("config")
     if isinstance(config, dict):
-        return dict(config)
-    return {
-        key: item
-        for key, item in value.items()
-        if key not in {"id", "name", "assetIndex", "asset", "chanjingAssetIndex", "enabled"}
-    }
+        result = dict(config)
+    else:
+        result = {
+            key: item
+            for key, item in value.items()
+            if key not in {"id", "name", "assetIndex", "asset", "chanjingAssetIndex", "enabled"}
+        }
+    if "textEffectColor" not in result and "captionColor" in result:
+        result["textEffectColor"] = result["captionColor"]
+    if "textEffectOutlineColor" not in result and "captionOutlineColor" in result:
+        result["textEffectOutlineColor"] = result["captionOutlineColor"]
+    if "textEffectOutlineSize" not in result and "captionOutlineSize" in result:
+        result["textEffectOutlineSize"] = result["captionOutlineSize"]
+    return result
 
 
 def normalize_template_definition(value, account_index, position):
