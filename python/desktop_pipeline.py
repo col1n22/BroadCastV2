@@ -1549,7 +1549,7 @@ def caption_effect_layout(settings, text):
     box = preview_layout_box(settings, "previewTextEffect", {"x": 100, "y": 1385, "w": 880, "h": 220, "min_w": 280, "min_h": 90})
     center_x, center_y = box_center(box)
     font_path = text_effect_font_path(settings)
-    outline_size = style_outline(settings, "captionOutlineSize", 8)
+    outline_size = style_outline(settings, "textEffectOutlineSize", style_outline(settings, "captionOutlineSize", 8))
     usable_width = max(80, int(box["w"] - outline_size * 2 - 24))
     usable_height = max(60, int(box["h"] - outline_size * 2 - 18))
     max_font_size = int(round(bounded_number(min(box["h"] * 0.44, usable_height / 1.05), batch.CAPTION_FONT_SIZE, 48, 128)))
@@ -1577,8 +1577,8 @@ def caption_effect_layout(settings, text):
         "max_font_size": max_font_size,
         "font_family": ass_family_for_path(font_path, batch.CAPTION_ASS_FONT_FAMILY),
         "font_path": str(font_path),
-        "color": normalized_hex_color(settings.get("captionColor"), "#ffffff"),
-        "outline_color": normalized_hex_color(settings.get("captionOutlineColor"), "#000000"),
+        "color": normalized_hex_color(settings.get("textEffectColor") or settings.get("captionColor"), "#ffffff"),
+        "outline_color": normalized_hex_color(settings.get("textEffectOutlineColor") or settings.get("captionOutlineColor"), "#000000"),
         "outline_size": outline_size,
     }
 
@@ -1991,13 +1991,13 @@ body {{ font-family: EffectCaptionFont, "Microsoft YaHei UI", sans-serif; }}
 }}
 .bubble .caption {{
   padding: 16px 24px 20px;
-  color: #10131a;
+  color: #{color};
   background: #fff;
-  border: 5px solid #10131a;
+  border: {max(2, outline)}px solid #{outline_color};
   border-radius: 8px;
-  box-shadow: 10px 10px 0 #28e0d0;
+  box-shadow: 10px 10px 0 rgba(40,224,208,.78);
   text-shadow: none;
-  -webkit-text-stroke: 0 transparent;
+  -webkit-text-stroke: {outline}px #{outline_color};
   animation: bubblePop {animation_seconds:.3f}s cubic-bezier(.12,1.75,.34,1) both;
 }}
 .bubble .caption::after {{
@@ -2007,7 +2007,7 @@ body {{ font-family: EffectCaptionFont, "Microsoft YaHei UI", sans-serif; }}
   bottom: -28px;
   border-width: 28px 24px 0 0;
   border-style: solid;
-  border-color: #10131a transparent transparent transparent;
+  border-color: #{outline_color} transparent transparent transparent;
 }}
 @keyframes bubblePop {{
   0% {{ opacity: 0; transform: scale(0) rotate(-6deg); }}

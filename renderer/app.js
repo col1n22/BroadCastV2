@@ -45,6 +45,9 @@ const fields = [
   'captionFontPath',
   'captionFontSize',
   'textEffectFontPath',
+  'textEffectColor',
+  'textEffectOutlineColor',
+  'textEffectOutlineSize',
   'disclaimerFontPath',
   'bgmFile',
   'bgmLibrary',
@@ -256,6 +259,9 @@ const templateFields = [
   'captionFontPath',
   'captionFontSize',
   'textEffectFontPath',
+  'textEffectColor',
+  'textEffectOutlineColor',
+  'textEffectOutlineSize',
   'disclaimerFontPath',
   'titleTopColor',
   'titleTopOutlineColor',
@@ -2087,6 +2093,9 @@ function previewOutlineForKind(kind) {
   if (kind === 'disclaimer') {
     return Number($('disclaimerOutlineSize')?.value || settings.disclaimerOutlineSize || 0);
   }
+  if (kind === 'textEffect') {
+    return Number($('textEffectOutlineSize')?.value || settings.textEffectOutlineSize || settings.captionOutlineSize || 0);
+  }
   return Number($('captionOutlineSize')?.value || settings.captionOutlineSize || 0);
 }
 
@@ -2366,8 +2375,12 @@ function applyPreviewTextStyle() {
     applyPreviewOutline(caption, $('captionOutlineSize')?.value || settings.captionOutlineSize, $('captionOutlineColor')?.value || settings.captionOutlineColor);
   }
   if (textEffect) {
-    textEffect.style.color = $('captionColor')?.value || settings.captionColor || '#ffffff';
-    applyPreviewOutline(textEffect, $('captionOutlineSize')?.value || settings.captionOutlineSize, $('captionOutlineColor')?.value || settings.captionOutlineColor);
+    textEffect.style.color = $('textEffectColor')?.value || settings.textEffectColor || settings.captionColor || '#ffffff';
+    applyPreviewOutline(
+      textEffect,
+      $('textEffectOutlineSize')?.value || settings.textEffectOutlineSize || settings.captionOutlineSize,
+      $('textEffectOutlineColor')?.value || settings.textEffectOutlineColor || settings.captionOutlineColor
+    );
   }
   if (disclaimer) {
     const opacity = clampNumber(Number($('disclaimerOpacityPercent')?.value || settings.disclaimerOpacityPercent || 50), 0, 100) / 100;
@@ -5459,6 +5472,9 @@ async function init() {
     'captionColor',
     'captionOutlineColor',
     'captionOutlineSize',
+    'textEffectColor',
+    'textEffectOutlineColor',
+    'textEffectOutlineSize',
     'disclaimerColor',
     'disclaimerOutlineColor',
     'disclaimerOutlineSize',

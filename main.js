@@ -140,6 +140,9 @@ function defaultSettings() {
     captionFontPath: defaultCaptionFontPath,
     captionFontSize: 96,
     textEffectFontPath: defaultCaptionFontPath,
+    textEffectColor: '#ffffff',
+    textEffectOutlineColor: '#000000',
+    textEffectOutlineSize: 8,
     disclaimerFontPath: defaultCaptionFontPath,
     bgmFile: path.join(bundlePath, 'assets', 'BGM', 'bgm2.mp3'),
     bgmLibrary: [
