@@ -110,6 +110,7 @@ function defaultSettings() {
     modelBaseUrl: '',
     modelApiKey: '',
     modelName: '',
+    sensitiveReplacementRules: '医=醫\n药=藥\n病=疒\n血=皿\n手术=手S',
     fontLibrary: [
       { name: '尔雅新大黑', path: defaultTitleFontPath },
       { name: '优设书华体', path: defaultCaptionFontPath }

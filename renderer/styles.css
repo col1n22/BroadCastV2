@@ -644,6 +644,49 @@ textarea {
   line-height: 1.45;
 }
 
+.sensitive-replacement-head,
+.sensitive-replacement-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr) 40px;
+  gap: 8px;
+  align-items: center;
+}
+
+.sensitive-replacement-head {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  padding: 0 9px;
+}
+
+.sensitive-replacement-list {
+  display: grid;
+  gap: 8px;
+}
+
+.sensitive-replacement-row {
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.sensitive-replacement-row:nth-child(even) {
+  background: #fff;
+}
+
+.sensitive-replacement-equals {
+  color: #334155;
+  font-size: 18px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.sensitive-replacement-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .summary-strip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

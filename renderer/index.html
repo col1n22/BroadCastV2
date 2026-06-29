@@ -679,6 +679,25 @@
             </div>
 
             <div class="settings-card">
+              <h3>敏感词替换</h3>
+              <div class="field">
+                <label>替换规则</label>
+                <textarea id="sensitiveReplacementRules" hidden></textarea>
+                <div class="sensitive-replacement-head">
+                  <span>原词 / 词组</span>
+                  <span></span>
+                  <span>替换为</span>
+                  <span></span>
+                </div>
+                <div id="sensitiveReplacementRuleList" class="sensitive-replacement-list"></div>
+                <div class="sensitive-replacement-actions">
+                  <button id="btnAddSensitiveReplacementRule" class="button secondary small" type="button">新增一行</button>
+                </div>
+                <p class="hint">支持单字和词组，生成标题、字幕、花字和 SRT 时按这里显示；蝉镜口播仍使用原文朗读。</p>
+              </div>
+            </div>
+
+            <div class="settings-card">
               <h3>音效</h3>
               <div class="media-library-section">
                 <div class="section-row">

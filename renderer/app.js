@@ -18,6 +18,7 @@ const fields = [
   'modelBaseUrl',
   'modelApiKey',
   'modelName',
+  'sensitiveReplacementRules',
   'fontLibrary',
   'titleFontPath',
   'titleTopFontPath',
@@ -184,6 +185,7 @@ let previewLayoutFrame = 0;
 const requiredClipFields = new Set(['clipTitle', 'clipCaption', 'clipBgm']);
 const optionalClipFields = ['hideCtaCaptions', 'clipTitleMotion', 'clipIntro', 'clipPatent', 'clipPip', 'clipTextEffects', 'clipLogo'];
 const textEffectIds = ['kinetic', 'slide-reveal', 'word-bounce', 'spring-up', 'bubble'];
+const defaultSensitiveReplacementRules = '医=醫\n药=藥\n病=疒\n血=皿\n手术=手S';
 const clipFieldLabels = {
   clipTitle: '标题',
   clipCaption: '字幕',
@@ -1401,6 +1403,117 @@ function normalizeTitleLineFontSettings(target = settings) {
   return target;
 }
 
+function normalizeSensitiveReplacementRules(value) {
+  if (value === undefined || value === null) return defaultSensitiveReplacementRules;
+  if (Array.isArray(value)) {
+    return value.map((item) => {
+      if (Array.isArray(item)) return `${item[0] || ''}=${item[1] || ''}`;
+      if (item && typeof item === 'object') return `${item.from || item.source || ''}=${item.to || item.target || ''}`;
+      return String(item || '');
+    }).join('\n');
+  }
+  return String(value);
+}
+
+function sensitiveReplacementRowsFromText(value) {
+  const text = normalizeSensitiveReplacementRules(value);
+  const rows = [];
+  const seen = new Set();
+  text.split(/\r?\n/).forEach((line) => {
+    const raw = line.trim();
+    if (!raw || raw.startsWith('#')) return;
+    let separator = raw.indexOf('=>');
+    let length = 2;
+    if (separator < 0) {
+      separator = raw.indexOf('->');
+      length = 2;
+    }
+    if (separator < 0) {
+      separator = raw.indexOf('=');
+      length = 1;
+    }
+    if (separator < 0) return;
+    const from = raw.slice(0, separator).trim();
+    const to = raw.slice(separator + length).trim();
+    if (!from || seen.has(from)) return;
+    seen.add(from);
+    rows.push({ from, to });
+  });
+  return rows;
+}
+
+function serializeSensitiveReplacementRows(rows) {
+  return rows
+    .map((row) => ({ from: String(row.from || '').trim(), to: String(row.to || '').trim() }))
+    .filter((row) => row.from)
+    .map((row) => `${row.from}=${row.to}`)
+    .join('\n');
+}
+
+function parseSensitiveReplacementRules(value) {
+  return sensitiveReplacementRowsFromText(value)
+    .sort((left, right) => right.from.length - left.from.length);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function applySensitiveReplacements(value, rulesValue = settings.sensitiveReplacementRules) {
+  const pairs = parseSensitiveReplacementRules(rulesValue);
+  let text = String(value || '');
+  if (!pairs.length || !text) return text;
+  const replacements = new Map(pairs.map((pair) => [pair.from, pair.to]));
+  const pattern = new RegExp(pairs.map((pair) => escapeRegExp(pair.from)).join('|'), 'g');
+  return text.replace(pattern, (match) => replacements.get(match) ?? match);
+}
+
+function sensitiveReplacementRowElement(row = {}) {
+  const el = document.createElement('div');
+  el.className = 'sensitive-replacement-row';
+  el.innerHTML = `
+    <input data-sensitive-from value="${escapeHtml(row.from || '')}" placeholder="例如：手术" />
+    <span class="sensitive-replacement-equals">=</span>
+    <input data-sensitive-to value="${escapeHtml(row.to || '')}" placeholder="例如：手S" />
+    <button class="icon-button danger" type="button" data-sensitive-remove title="删除">×</button>
+  `;
+  return el;
+}
+
+function collectSensitiveReplacementRulesFromUi() {
+  const list = $('sensitiveReplacementRuleList');
+  if (!list) return $('sensitiveReplacementRules')?.value || settings.sensitiveReplacementRules || defaultSensitiveReplacementRules;
+  const rows = Array.from(list.querySelectorAll('.sensitive-replacement-row')).map((row) => ({
+    from: row.querySelector('[data-sensitive-from]')?.value || '',
+    to: row.querySelector('[data-sensitive-to]')?.value || ''
+  }));
+  return serializeSensitiveReplacementRows(rows);
+}
+
+function syncSensitiveReplacementRulesFromUi(updatePreview = true) {
+  const hidden = $('sensitiveReplacementRules');
+  const value = collectSensitiveReplacementRulesFromUi();
+  if (hidden) hidden.value = value;
+  settings.sensitiveReplacementRules = value;
+  if (updatePreview) {
+    generatePreviewTitle();
+    generatePreviewCaption();
+    updatePreviewLayout();
+  }
+}
+
+function renderSensitiveReplacementRules(value = settings.sensitiveReplacementRules) {
+  const list = $('sensitiveReplacementRuleList');
+  const hidden = $('sensitiveReplacementRules');
+  if (!list) return;
+  const rows = sensitiveReplacementRowsFromText(value);
+  list.innerHTML = '';
+  (rows.length ? rows : [{ from: '', to: '' }]).forEach((row) => {
+    list.appendChild(sensitiveReplacementRowElement(row));
+  });
+  if (hidden) hidden.value = serializeSensitiveReplacementRows(rows);
+}
+
 function settingBoolean(value, fallback = false) {
   if (value === undefined || value === null || value === '') return fallback;
   if (typeof value === 'boolean') return value;
@@ -1489,6 +1602,7 @@ function collectSettings() {
   const next = collectSettingsBase();
   normalizeTitleLineFontSettings(next);
   normalizeTitleBackgroundSettings(next);
+  next.sensitiveReplacementRules = normalizeSensitiveReplacementRules(collectSensitiveReplacementRulesFromUi());
   next.chanjingAccounts = normalizeAccounts(settings.chanjingAccounts);
   next.chanjingAssetOverrides = normalizeAssetOverrides(settings.chanjingAssetOverrides);
   next.accountTemplates = normalizeAccountTemplates(settings.accountTemplates);
@@ -1546,6 +1660,7 @@ function fillSettings(value) {
   settings.sfxLibrary = normalizeMediaLibraryForKind('sfx', settings.sfxLibrary);
   settings.openingVideoLibrary = normalizeMediaLibraryForKind('openingVideo', settings.openingVideoLibrary);
   settings.pipMaterialLibrary = normalizeMediaLibraryForKind('pipMaterial', settings.pipMaterialLibrary);
+  settings.sensitiveReplacementRules = normalizeSensitiveReplacementRules(settings.sensitiveReplacementRules);
   Object.assign(settings, normalizeSilenceTrimSettings(settings));
   Object.assign(settings, normalizeVideoSpeedSettings(settings));
   settings.accountTemplates = migrateLegacyAccountTemplates(settings.accountTemplates, settings.accountAssetTemplates);
@@ -1643,6 +1758,7 @@ function fillSettings(value) {
   });
   renderPipRules(settings.pipRules);
   renderTextEffectKeywordRules(settings.textEffectKeywordRules);
+  renderSensitiveReplacementRules(settings.sensitiveReplacementRules);
   renderFontLibrary();
   syncFontSelectControls();
   renderAllMediaLibraries();
@@ -1989,11 +2105,10 @@ function fitPreviewBoxFontSize(el, box, maxSize, minSize, kind, lineHeightRatio 
 }
 
 function previewDisplayText(value) {
-  return String(value || '')
-    .replaceAll('医', '醫')
-    .replaceAll('药', '藥')
-    .replaceAll('病', '疒')
-    .replaceAll('血', '皿');
+  return applySensitiveReplacements(
+    value,
+    $('sensitiveReplacementRules')?.value ?? settings.sensitiveReplacementRules
+  );
 }
 
 function previewDisplayLine(value) {
@@ -5364,6 +5479,31 @@ async function init() {
 
   ['videoSpeedEnabled', 'videoSpeedRate'].forEach((id) => {
     $(id)?.addEventListener('change', syncVideoSpeedFields);
+  });
+
+  $('sensitiveReplacementRuleList')?.addEventListener('input', (event) => {
+    if (event.target.matches('[data-sensitive-from], [data-sensitive-to]')) {
+      syncSensitiveReplacementRulesFromUi(true);
+    }
+  });
+  $('sensitiveReplacementRuleList')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-sensitive-remove]');
+    if (!button) return;
+    const row = button.closest('.sensitive-replacement-row');
+    row?.remove();
+    const list = $('sensitiveReplacementRuleList');
+    if (list && !list.querySelector('.sensitive-replacement-row')) {
+      list.appendChild(sensitiveReplacementRowElement());
+    }
+    syncSensitiveReplacementRulesFromUi(true);
+  });
+  $('btnAddSensitiveReplacementRule')?.addEventListener('click', () => {
+    const list = $('sensitiveReplacementRuleList');
+    if (!list) return;
+    list.appendChild(sensitiveReplacementRowElement());
+    syncSensitiveReplacementRulesFromUi(false);
+    const lastInput = list.querySelector('.sensitive-replacement-row:last-child [data-sensitive-from]');
+    lastInput?.focus();
   });
 
   [

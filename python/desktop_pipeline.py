@@ -67,6 +67,71 @@ TEXT_EFFECT_IDS = ("kinetic", "slide-reveal", "word-bounce", "spring-up", "bubbl
 MAX_TEXT_EFFECT_EVENTS = 3
 TEXT_EFFECT_ANIMATION_RATIO = 2 / 3
 SELF_INTRO_MIN_SECONDS = 3.5
+DEFAULT_SENSITIVE_REPLACEMENT_RULES = "医=醫\n药=藥\n病=疒\n血=皿\n手术=手S"
+
+
+def parse_sensitive_replacement_rules(value):
+    if value is None:
+        value = DEFAULT_SENSITIVE_REPLACEMENT_RULES
+    if isinstance(value, list):
+        lines = []
+        for item in value:
+            if isinstance(item, dict):
+                lines.append(f"{item.get('from') or item.get('source') or ''}={item.get('to') or item.get('target') or ''}")
+            elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                lines.append(f"{item[0]}={item[1]}")
+            else:
+                lines.append(str(item or ""))
+        value = "\n".join(lines)
+    pairs = []
+    seen = set()
+    for raw_line in str(value or "").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        separator = None
+        sep_len = 0
+        for marker in ("=>", "->", "="):
+            index = line.find(marker)
+            if index >= 0:
+                separator = index
+                sep_len = len(marker)
+                break
+        if separator is None:
+            continue
+        source = line[:separator].strip()
+        target = line[separator + sep_len:].strip()
+        if not source or source in seen:
+            continue
+        seen.add(source)
+        pairs.append((source, target))
+    return sorted(pairs, key=lambda pair: len(pair[0]), reverse=True)
+
+
+def apply_sensitive_display_replacements(text, pairs):
+    value = str(text or "")
+    if not value or not pairs:
+        return value
+    lookup = {source: target for source, target in pairs}
+    pattern = re.compile("|".join(re.escape(source) for source, _target in pairs))
+    return pattern.sub(lambda match: lookup.get(match.group(0), match.group(0)), value)
+
+
+def configure_batch_display_replacements(settings):
+    pairs = parse_sensitive_replacement_rules((settings or {}).get("sensitiveReplacementRules"))
+
+    def display_text(text):
+        return apply_sensitive_display_replacements(text, pairs)
+
+    batch.display_text = display_text
+    return pairs
+
+
+def display_replacement_summary(settings):
+    pairs = parse_sensitive_replacement_rules((settings or {}).get("sensitiveReplacementRules"))
+    if not pairs:
+        return "显示替换未配置。"
+    return "显示替换已经执行：" + "，".join(f"{source}显示为{target}" for source, target in pairs) + "。"
 
 
 def log(message):
@@ -2722,6 +2787,7 @@ def apply_settings(settings, bundle):
     os.environ["CHANJING_APP_ID"] = require(settings.get("chanjingAppId"), "蝉镜 AK / App ID")
     os.environ["CHANJING_SECRET_KEY"] = require(settings.get("chanjingSecretKey"), "蝉镜 SK / Secret Key")
 
+    display_replacement_pairs = configure_batch_display_replacements(settings)
     batch.TITLE_FONT_PATH = title_top_font
     batch.CAPTION_FONT_PATH = caption_font
     batch.DISCLAIMER_FONT_PATH = disclaimer_font
@@ -2752,6 +2818,7 @@ def apply_settings(settings, bundle):
         "bgm_mode": bgm_mode,
         "output_dir": output_dir,
         "bundle": bundle,
+        "display_replacement_count": len(display_replacement_pairs),
     }
 
 
@@ -3573,7 +3640,7 @@ def supervise_caption_breaks(settings, item):
             "每行硬性最多 10 个显示字；单行尽量 7-10 个中文字符；超过 10 个字必须强制拆成多行或相邻多页，遇到大家好我是北京特聘基层、专攻二型糖尿疒调理方向、可只要它和皿糖反复一起出现这类长行必须拆开。",
             "不能出现饭后高背/后、胰岛修/复、一吃/饭、糖尿/疒、二型糖尿/疒这类读起来别扭或把词拆碎的断法。",
             "不能改字、不能漏字、不能添加标点；每一行字幕结尾都不要带逗号、句号、问号、感叹号、顿号、分号、冒号等标点；可以把连续单元合成一页。",
-            "显示替换已经执行：医显示为醫，药显示为藥，病显示为疒，血显示为皿。",
+            display_replacement_summary(settings),
             "CTA 也要显示字幕。",
         ],
         "caption_units": unit_payload,
@@ -4725,6 +4792,7 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             "chanjing_account_index": str(settings.get("chanjingAccountIndex", "")),
             "chanjing_asset_index": str(settings.get("chanjingAssetIndex", "")),
             "caption_buffer_seconds": f"{caption_buffer_seconds(settings):.3f}",
+            "sensitive_replacement_count": runtime.get("display_replacement_count", 0),
             "disable_silence_trim": bool_setting(settings.get("disableSilenceTrim")),
             "pip_duration_seconds": f"{pip_duration_seconds(settings):.3f}",
             "pip_close_at_sentence_end": pip_close_at_sentence_end(settings),
