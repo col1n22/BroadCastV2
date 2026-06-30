@@ -1474,10 +1474,16 @@ th {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+  flex-wrap: wrap;
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid var(--line);
   background: var(--bg);
+}
+
+.preview-footer-spacer {
+  flex: 1 1 auto;
+  min-width: 12px;
 }
 
 .preview-position-grid {

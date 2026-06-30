@@ -4365,6 +4365,65 @@ async function saveSettings() {
   appendLog('[设置] 已保存\n');
 }
 
+async function applyCurrentTemplateLayout(scope = 'account') {
+  const current = collectSettings();
+  const account = Math.max(1, Number(current.chanjingAccountIndex || settings.chanjingAccountIndex || 1));
+  const templateId = String(current.currentTemplateId || settings.currentTemplateId || '');
+  const accountTemplates = normalizeAccountTemplates(current.accountTemplates);
+  const sourceList = accountTemplates[account] || [];
+  const sourceTemplate = sourceList.find((template) => template.id === templateId);
+  if (!sourceTemplate) {
+    appendLog('[模板] 请先选择一个已保存的模板，再应用布局。\n', true);
+    return;
+  }
+
+  const targetAccounts = scope === 'all'
+    ? Object.keys(accountTemplates).map((key) => Math.max(1, Number(key || 1))).filter((value, index, list) => list.indexOf(value) === index)
+    : [account];
+  const targetCount = targetAccounts.reduce((total, accountIndex) => total + (accountTemplates[accountIndex] || []).length, 0);
+  if (!targetCount) {
+    appendLog('[模板] 没有可应用的目标模板。\n', true);
+    return;
+  }
+
+  const scopeText = scope === 'all' ? '所有账号下的全部模板' : `${accountName(account)} 下的全部模板`;
+  const warning = [
+    `警告：即将把当前模板「${sourceTemplate.name}」的布局和样式应用到${scopeText}。`,
+    `本次会覆盖 ${targetCount} 个模板的标题、字幕、花字、声明、Logo、画中画位置和相关样式配置。`,
+    '每个模板原来绑定的数字人形象会保留不变。',
+    '此操作不能自动撤回，建议已经提前导出配置备份。',
+    '',
+    '确认继续应用吗？'
+  ].join('\n');
+  if (!window.confirm(warning)) return;
+
+  const sourceConfig = cloneTemplateValue(sourceTemplate.config || captureTemplate(current));
+  const nextTemplates = normalizeAccountTemplates(accountTemplates);
+  targetAccounts.forEach((accountIndex) => {
+    nextTemplates[accountIndex] = (nextTemplates[accountIndex] || []).map((template) => ({
+      ...template,
+      assetIndex: Math.max(1, Number(template.assetIndex || 1)),
+      config: cloneTemplateValue(sourceConfig)
+    }));
+  });
+
+  settings = await window.huApp.saveSettings({
+    ...current,
+    accountTemplates: nextTemplates,
+    chanjingAccountIndex: account,
+    currentTemplateId: templateId,
+    chanjingAssetIndex: sourceTemplate.assetIndex
+  });
+  fillSettings(settings);
+  renderChanjingAccountOptions();
+  renderRunAccountOptions();
+  renderTemplateOptions();
+  await refreshChanjingAssets();
+  refreshPreviewBackground();
+  updatePreviewSetupState();
+  appendLog(`[模板] 已将「${sourceTemplate.name}」布局应用到${scopeText}，共 ${targetCount} 个模板；数字人形象保持不变。\n`);
+}
+
 async function refreshAfterSettingsImport(nextSettings) {
   settings = nextSettings || await window.huApp.loadSettings();
   fillSettings(settings);
@@ -5407,6 +5466,8 @@ async function init() {
   $('btnOpenTemplateFromEmpty')?.addEventListener('click', openAddTemplateModal);
   $('btnResetPreviewLayout').addEventListener('click', resetPreviewLayoutToDefaults);
   $('btnSavePreviewSettings').addEventListener('click', saveSettings);
+  $('btnApplyTemplateLayoutToAccount')?.addEventListener('click', () => applyCurrentTemplateLayout('account'));
+  $('btnApplyTemplateLayoutToAll')?.addEventListener('click', () => applyCurrentTemplateLayout('all'));
   $('templateSelectionButton')?.addEventListener('click', toggleTemplateSelectionOpen);
   document.addEventListener('click', (event) => {
     const dropdown = $('templateSelectionDropdown');
