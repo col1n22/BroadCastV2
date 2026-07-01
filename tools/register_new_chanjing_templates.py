@@ -206,6 +206,28 @@ def create_person(settings, token, item):
     raise RuntimeError(f"create failed for {item['file']}: {res}")
 
 
+def refresh_customised_person_detail(settings, token, item, wait_for_audio=False):
+    person_id = item.get("person_id")
+    if not person_id:
+        return
+    base_url = settings.get("chanjingBaseUrl") or "https://www.chanjing.cc/api"
+    attempts = 90 if wait_for_audio else 1
+    last_detail = {}
+    for attempt in range(1, attempts + 1):
+        res = api_request(base_url, "GET", "/open/v1/customised_person", token=token, query={"id": person_id})
+        item["person_detail_response"] = res
+        detail = res.get("data") or {}
+        last_detail = detail
+        for key in ("audio_man_id", "status", "progress", "preview_url", "pic_url", "width", "height", "err_reason"):
+            if detail.get(key) not in (None, ""):
+                item[key] = detail.get(key)
+        if not wait_for_audio or item.get("audio_man_id"):
+            return
+        log(f"[wait-audio] {item['file']} attempt {attempt}: status={detail.get('status')} progress={detail.get('progress')}")
+        time.sleep(5)
+    raise RuntimeError(f"customised person audio not ready: {item['file']} {last_detail}")
+
+
 def media_dimensions(path):
     ffprobe = shutil.which("ffprobe")
     if not ffprobe:
@@ -264,18 +286,21 @@ def register_assets(bundle_path, items, fixed_voice_id, voice_mode, source_label
         if not person_id:
             continue
         source = Path(item["path"])
-        width, height = media_dimensions(source)
-        preview_url = source.resolve().as_uri()
+        width = int(item.get("width") or media_dimensions(source)[0])
+        height = int(item.get("height") or media_dimensions(source)[1])
+        preview_url = item.get("preview_url") or source.resolve().as_uri()
         make_cover(source, covers_dir / f"{source.stem}.jpg")
         pic_url = f"openapi/new_template_covers/{source.stem}.jpg"
-        audio_man_id = person_id if voice_mode == "own" else fixed_voice_id
+        audio_man_id = item.get("audio_man_id") if voice_mode == "own" else fixed_voice_id
+        if voice_mode == "own" and not audio_man_id:
+            raise RuntimeError(f"missing self voice audio_man_id for {source.name}")
         entry = {
             "file": source.name,
             "name": item.get("name") or f"新数字人模板_{source.stem}",
             "person_id": person_id,
             "audio_man_id": audio_man_id,
             "status": item.get("status") or "submitted",
-            "progress": 0 if item.get("status") == "submitted" else item.get("progress", 0),
+            "progress": item.get("progress", 0),
             "width": width,
             "height": height,
             "preview_url": preview_url,
@@ -355,6 +380,11 @@ def main():
         last_create = time.time()
         item["updated_at"] = int(last_create)
         write_json(state_path, state)
+
+    if args.voice_mode == "own":
+        for item in state["items"]:
+            refresh_customised_person_detail(settings, token, item, wait_for_audio=True)
+            write_json(state_path, state)
 
     result = register_assets(bundle_path, state["items"], args.fixed_voice_id, args.voice_mode, args.source_label)
     state["asset_register_result"] = result
