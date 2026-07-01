@@ -2190,6 +2190,92 @@ def overlay_text_effect_clips(base_path, clips, output_path):
     subprocess.run(cmd, check=True)
 
 
+def ffmpeg_filter_cache_root(source_path=None):
+    candidates = []
+    source = Path(source_path) if source_path else None
+    if sys.platform == "win32" and source and source.drive:
+        candidates.append(Path(source.drive + "\\hu_teacher_ffmpeg_filter_cache"))
+    program_data = os.environ.get("ProgramData")
+    if program_data:
+        candidates.append(Path(program_data) / "HuTeacherVideo" / "ffmpeg_filter_cache")
+    candidates.append(Path(tempfile.gettempdir()) / "hu_teacher_ffmpeg_filter_cache")
+    for candidate in candidates:
+        if not str(candidate).isascii():
+            continue
+        try:
+            return ensure_writable_dir(candidate)
+        except Exception:
+            continue
+    return None
+
+
+def cached_ascii_file_for_ffmpeg_filter(source_path, kind):
+    source = Path(source_path)
+    try:
+        resolved = source.resolve()
+    except OSError:
+        resolved = source
+    if str(resolved).isascii():
+        return resolved
+    try:
+        stat = resolved.stat()
+    except OSError:
+        return resolved
+    root = ffmpeg_filter_cache_root(resolved)
+    if not root:
+        return resolved
+    suffix = resolved.suffix or ".dat"
+    digest = hashlib.sha1(f"{resolved}|{stat.st_size}|{stat.st_mtime_ns}".encode("utf-8", "surrogatepass")).hexdigest()[:24]
+    target_dir = root / kind
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / f"{digest}{suffix}"
+    if not target.exists() or target.stat().st_size != stat.st_size:
+        shutil.copy2(resolved, target)
+    return target
+
+
+def cached_ascii_font_dir_for_ffmpeg_filter(font_dir):
+    source_dir = Path(font_dir)
+    try:
+        resolved = source_dir.resolve()
+    except OSError:
+        resolved = source_dir
+    if str(resolved).isascii():
+        return resolved
+    root = ffmpeg_filter_cache_root(resolved)
+    if not root or not resolved.exists():
+        return resolved
+    digest = hashlib.sha1(str(resolved).encode("utf-8", "surrogatepass")).hexdigest()[:16]
+    target_dir = root / "fonts" / digest
+    target_dir.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for font in resolved.iterdir():
+        if not font.is_file() or font.suffix.lower() not in {".ttf", ".otf", ".ttc", ".otc"}:
+            continue
+        try:
+            stat = font.stat()
+        except OSError:
+            continue
+        font_digest = hashlib.sha1(f"{font.name}|{stat.st_size}|{stat.st_mtime_ns}".encode("utf-8", "surrogatepass")).hexdigest()[:24]
+        target = target_dir / f"font_{font_digest}{font.suffix.lower()}"
+        if not target.exists() or target.stat().st_size != stat.st_size:
+            shutil.copy2(font, target)
+        copied += 1
+    return target_dir if copied else resolved
+
+
+def run_ffmpeg_checked(cmd, context):
+    proc = subprocess.run(cmd, text=True, encoding="utf-8", errors="replace", capture_output=True)
+    if proc.returncode == 0:
+        return
+    stderr = (proc.stderr or "").strip()
+    stdout = (proc.stdout or "").strip()
+    details = stderr or stdout or "FFmpeg 没有输出错误详情，可能是底层滤镜/字体库直接崩溃。"
+    if len(details) > 6000:
+        details = details[-6000:]
+    raise RuntimeError(f"{context}失败，FFmpeg退出码 {proc.returncode}：\n{details}")
+
+
 def render_packaged_without_builtin_logo(raw_video, ass_path, packaged_path, pip_events=None):
     pip_events = pip_events or []
     cmd = [
@@ -2228,8 +2314,10 @@ def render_packaged_without_builtin_logo(raw_video, ass_path, packaged_path, pip
         )
         base_label = out_label
 
-    ass_filter_path = batch.ffmpeg_filter_path(ass_path)
-    font_filter_path = batch.ffmpeg_filter_path(batch.FONT_DIR)
+    safe_ass_path = cached_ascii_file_for_ffmpeg_filter(ass_path, "ass")
+    safe_font_dir = cached_ascii_font_dir_for_ffmpeg_filter(batch.FONT_DIR)
+    ass_filter_path = batch.ffmpeg_filter_path(safe_ass_path)
+    font_filter_path = batch.ffmpeg_filter_path(safe_font_dir)
     filter_parts.append(f"[{base_label}]ass=filename='{ass_filter_path}':fontsdir='{font_filter_path}'[v]")
 
     cmd.extend([
@@ -2244,7 +2332,7 @@ def render_packaged_without_builtin_logo(raw_video, ass_path, packaged_path, pip
         "-movflags", "+faststart",
         str(packaged_path),
     ])
-    subprocess.run(cmd, check=True)
+    run_ffmpeg_checked(cmd, "字幕/画中画合成")
 
 
 def overlay_logo_full_video(input_path, logo_file, settings, output_path):
