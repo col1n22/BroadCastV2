@@ -2,7 +2,7 @@ const { app, BrowserWindow, dialog, ipcMain, screen, shell } = require('electron
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { pathToFileURL } = require('url');
+const { fileURLToPath, pathToFileURL } = require('url');
 const { spawn } = require('child_process');
 
 let mainWindow = null;
@@ -755,19 +755,62 @@ function normalizeAssetOverrides(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
+function webUrl(value) {
+  return /^https?:\/\//i.test(String(value || '').trim());
+}
+
+function fileUrlExists(value) {
+  const text = String(value || '').trim();
+  if (!text || !/^file:\/\//i.test(text)) return false;
+  try {
+    return fs.existsSync(fileURLToPath(text));
+  } catch (_error) {
+    return false;
+  }
+}
+
+function bundleAssetUrl(bundlePath, value, fallbackRelative = '') {
+  const bundleRoot = bundlePath || defaultSettings().bundlePath;
+  const text = String(value || '').trim();
+  if (webUrl(text)) return text;
+  if (fileUrlExists(text)) return text;
+  if (text && !/^[a-z][a-z0-9+.-]*:/i.test(text)) {
+    const candidate = path.isAbsolute(text) ? text : path.join(bundleRoot, text);
+    if (fs.existsSync(candidate)) return pathToFileURL(candidate).href;
+  }
+  if (fallbackRelative) {
+    const fallback = path.join(bundleRoot, fallbackRelative);
+    if (fs.existsSync(fallback)) return pathToFileURL(fallback).href;
+  }
+  return webUrl(text) ? text : '';
+}
+
+function normalizeChanjingAssetUrls(bundlePath, asset) {
+  const stem = String(asset?.file || '').replace(/\.[^.]+$/, '');
+  const bundledCover = stem ? path.join('openapi', 'new_template_covers', `${stem}.jpg`) : '';
+  return {
+    ...asset,
+    pic_url: bundleAssetUrl(bundlePath, asset?.pic_url, bundledCover),
+    preview_url: bundleAssetUrl(bundlePath, asset?.preview_url)
+  };
+}
+
 function loadChanjingAssets(bundlePath, overrides = {}) {
   const filePath = chanjingAssetsPath(bundlePath || defaultSettings().bundlePath);
   if (!fs.existsSync(filePath)) return [];
   const raw = readJsonFile(filePath);
   if (!Array.isArray(raw)) return [];
   const assetOverrides = normalizeAssetOverrides(overrides);
-  return raw.map((asset, index) => ({
-    ...asset,
-    index: index + 1,
-    label: String(assetOverrides[index + 1]?.name || `资产${index + 1}`).trim() || `资产${index + 1}`,
-    enabled: assetOverrides[index + 1]?.enabled !== false,
-    detailLabel: asset.name || asset.file || asset.person_id || ''
-  }));
+  return raw.map((asset, index) => {
+    const normalized = normalizeChanjingAssetUrls(bundlePath, asset);
+    return {
+      ...normalized,
+      index: index + 1,
+      label: String(assetOverrides[index + 1]?.name || `资产${index + 1}`).trim() || `资产${index + 1}`,
+      enabled: assetOverrides[index + 1]?.enabled !== false,
+      detailLabel: normalized.name || normalized.file || normalized.person_id || ''
+    };
+  });
 }
 
 function selectedTemplateAssetIndex(settings = {}) {

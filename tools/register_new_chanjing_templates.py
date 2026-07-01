@@ -69,7 +69,18 @@ def get_token(settings):
     return res["data"]["access_token"]
 
 
-def video_files(source_dir):
+def video_files(source_dir=None, selected_files=None):
+    if selected_files:
+        files = []
+        for item in selected_files:
+            path = Path(item)
+            if not path.exists():
+                raise SystemExit(f"video file not found: {path}")
+            if not path.is_file() or path.suffix.lower() not in VIDEO_EXTS:
+                raise SystemExit(f"unsupported video file: {path}")
+            files.append(path)
+        return files
+
     source = Path(source_dir)
     if not source.exists():
         raise SystemExit(f"source dir not found: {source}")
@@ -97,16 +108,22 @@ def next_api_number(bundle_path):
     return max_number + 1
 
 
-def load_state(state_path, files, bundle_path):
+def load_state(state_path, files, bundle_path, names=None):
     state = read_json(state_path, {"items": []})
     by_file = {item.get("file"): item for item in state.get("items", []) if item.get("file")}
     items = []
     next_number = next_api_number(bundle_path)
-    for path in files:
+    names = list(names or [])
+    if names and len(names) != len(files):
+        raise SystemExit(f"--name count ({len(names)}) must match video count ({len(files)})")
+    for index, path in enumerate(files):
         item = dict(by_file.get(path.name) or {})
         item.setdefault("file", path.name)
         item["path"] = str(path)
-        item.setdefault("name", f"胡老师_API_{next_number}")
+        if names:
+            item["name"] = names[index]
+        else:
+            item.setdefault("name", f"胡老师_API_{next_number}")
         item.setdefault("status", "pending")
         items.append(item)
         next_number += 1
@@ -232,7 +249,7 @@ def make_cover(video_path, cover_path):
         return ""
 
 
-def register_assets(bundle_path, items, fixed_voice_id):
+def register_assets(bundle_path, items, fixed_voice_id, voice_mode, source_label):
     asset_path = Path(bundle_path) / "openapi" / "hu_teacher_api_assets.json"
     assets = read_json(asset_path, [])
     if not isinstance(assets, list):
@@ -249,12 +266,14 @@ def register_assets(bundle_path, items, fixed_voice_id):
         source = Path(item["path"])
         width, height = media_dimensions(source)
         preview_url = source.resolve().as_uri()
-        pic_url = make_cover(source, covers_dir / f"{source.stem}.jpg")
+        make_cover(source, covers_dir / f"{source.stem}.jpg")
+        pic_url = f"openapi/new_template_covers/{source.stem}.jpg"
+        audio_man_id = person_id if voice_mode == "own" else fixed_voice_id
         entry = {
             "file": source.name,
             "name": item.get("name") or f"新数字人模板_{source.stem}",
             "person_id": person_id,
-            "audio_man_id": fixed_voice_id,
+            "audio_man_id": audio_man_id,
             "status": item.get("status") or "submitted",
             "progress": 0 if item.get("status") == "submitted" else item.get("progress", 0),
             "width": width,
@@ -262,7 +281,9 @@ def register_assets(bundle_path, items, fixed_voice_id):
             "preview_url": preview_url,
             "pic_url": pic_url,
             "err_reason": "",
-            "source": "new_digital_person_templates",
+            "source": source_label,
+            "voice_policy": "own_uploaded_video" if voice_mode == "own" else "fixed_api_1_1",
+            "preserve_own_voice": voice_mode == "own",
             "created_at": int(time.time()),
         }
         index = by_person.get(person_id)
@@ -294,9 +315,14 @@ def sync_asset_json(source_bundle, target_bundle):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-dir", default=str(Path.home() / "Desktop" / "新数字人模板"))
+    parser.add_argument("--video", action="append", default=[], help="explicit video file; repeat to preserve order")
+    parser.add_argument("--name", action="append", default=[], help="asset display name; repeat once per video")
     parser.add_argument("--settings", default=str(app_settings_path()))
     parser.add_argument("--repo-bundle", default="")
     parser.add_argument("--fixed-voice-id", default=FIXED_VOICE_AUDIO_MAN_ID)
+    parser.add_argument("--voice-mode", choices=["fixed", "own"], default="fixed")
+    parser.add_argument("--source-label", default="new_digital_person_templates")
+    parser.add_argument("--state-name", default="new_digital_person_templates_state.json")
     args = parser.parse_args()
 
     settings = read_json(args.settings, {})
@@ -305,11 +331,13 @@ def main():
     bundle_path = Path(settings.get("bundlePath") or "").resolve()
     if not bundle_path.exists():
         raise SystemExit(f"bundlePath not found: {bundle_path}")
-    state_path = bundle_path / "work" / "new_digital_person_templates_state.json"
-    files = video_files(args.source_dir)
-    state = load_state(state_path, files, bundle_path)
+    state_path = bundle_path / "work" / args.state_name
+    files = video_files(args.source_dir, args.video)
+    state = load_state(state_path, files, bundle_path, args.name)
     state["updated_at"] = int(time.time())
     state["fixed_voice_id"] = args.fixed_voice_id
+    state["voice_mode"] = args.voice_mode
+    state["source_label"] = args.source_label
     write_json(state_path, state)
 
     token = get_token(settings)
@@ -328,7 +356,7 @@ def main():
         item["updated_at"] = int(last_create)
         write_json(state_path, state)
 
-    result = register_assets(bundle_path, state["items"], args.fixed_voice_id)
+    result = register_assets(bundle_path, state["items"], args.fixed_voice_id, args.voice_mode, args.source_label)
     state["asset_register_result"] = result
     state["updated_at"] = int(time.time())
     if args.repo_bundle:

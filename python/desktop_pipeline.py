@@ -4512,6 +4512,10 @@ def asset_with_fixed_voice(asset, assets=None):
 
 
 def asset_with_allowed_voice(asset, assets):
+    if asset.get("preserve_own_voice") or asset.get("voice_policy") == "own_uploaded_video":
+        updated = dict(asset)
+        updated["voice_policy"] = "own_uploaded_video"
+        return updated
     return asset_with_fixed_voice(asset, assets)
 
 
@@ -4589,7 +4593,7 @@ def ensure_raw_video(item, index, assets, state_path, state, settings, force_fre
     entry = state["items"].setdefault(slug, {})
     requested_asset = selected_chanjing_asset(settings, assets)
     if requested_asset:
-        requested_asset = asset_with_fixed_voice(requested_asset, assets)
+        requested_asset = asset_with_allowed_voice(requested_asset, assets)
     if force_fresh:
         entry = {}
         state["items"][slug] = entry
