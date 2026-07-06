@@ -685,6 +685,49 @@
             </div>
 
             <div class="settings-card">
+              <h3>字幕与剪辑规则</h3>
+              <div class="field">
+                <label>字幕缓冲时间（秒）</label>
+                <input id="captionBufferSeconds" type="number" min="0" max="0.5" step="0.01" />
+                <p class="hint">上一段字幕会提前结束这段时间，默认 0.12 秒。</p>
+              </div>
+              <div class="field">
+                <label class="inline-check standalone"><input id="disableSilenceTrim" type="checkbox" /><span>禁用气口/剪辑</span></label>
+                <p class="hint">勾选后直接跳过气口/静音停顿剪辑，保留原视频节奏。</p>
+              </div>
+              <div class="field">
+                <label class="inline-check standalone"><input id="trimSilenceEnabled" type="checkbox" /><span>剪辑气口/静音停顿</span></label>
+                <p class="hint">开启后按下面参数剪掉低音量停顿；默认保持当前配置。</p>
+              </div>
+              <div class="silence-trim-grid">
+                <div class="field">
+                  <label>静音超过（秒）</label>
+                  <input id="silenceMinSeconds" type="number" min="0.05" max="2" step="0.01" />
+                </div>
+                <div class="field">
+                  <label>单侧保留缓冲（秒）</label>
+                  <input id="silenceKeepBufferSeconds" type="number" min="0" max="0.5" step="0.01" />
+                </div>
+                <div class="field">
+                  <label>中间总保留（自动）</label>
+                  <input id="silenceMiddleKeepSeconds" type="number" readonly />
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <h3>视频倍速</h3>
+              <div class="field">
+                <label class="inline-check standalone"><input id="videoSpeedEnabled" type="checkbox" /><span>启用视频倍速</span></label>
+                <p class="hint">倍速会在剪辑气口之后、添加 BGM 和音效之前执行，所以数字人声音会变速，BGM/音效不会被变速。</p>
+              </div>
+              <div class="field">
+                <label>倍速倍率</label>
+                <input id="videoSpeedRate" type="number" min="0.5" max="2" step="0.05" />
+              </div>
+            </div>
+
+            <div class="settings-card">
               <h3>敏感词替换</h3>
               <div class="field">
                 <label>替换规则</label>
@@ -942,45 +985,6 @@
               </div>
               <div id="textEffectKeywordRuleList" class="text-effect-keyword-rule-list"></div>
               <p class="hint">前端先保存触发关键词；后端接入后会用命中的分行后字幕单行做花字。</p>
-            </div>
-
-            <div class="settings-card">
-              <h3>字幕规则</h3>
-              <div class="field">
-                <label>字幕缓冲时间（秒）</label>
-                <input id="captionBufferSeconds" type="number" min="0" max="0.5" step="0.01" />
-                <p class="hint">上一段字幕会提前结束这段时间，默认 0.12 秒。</p>
-              </div>
-              <div class="field">
-                <label class="inline-check standalone"><input id="disableSilenceTrim" type="checkbox" /><span>禁用气口/剪辑</span></label>
-                <p class="hint">勾选后直接跳过气口/静音停顿剪辑，保留原视频节奏。</p>
-              </div>
-              <div class="field">
-                <label class="inline-check standalone"><input id="trimSilenceEnabled" type="checkbox" /><span>剪辑气口/静音停顿</span></label>
-                <p class="hint">开启后按下面参数剪掉低音量停顿；默认保持当前配置。</p>
-              </div>
-              <div class="silence-trim-grid">
-                <div class="field">
-                  <label>静音超过（秒）</label>
-                  <input id="silenceMinSeconds" type="number" min="0.05" max="2" step="0.01" />
-                </div>
-                <div class="field">
-                  <label>单侧保留缓冲（秒）</label>
-                  <input id="silenceKeepBufferSeconds" type="number" min="0" max="0.5" step="0.01" />
-                </div>
-                <div class="field">
-                  <label>中间总保留（自动）</label>
-                  <input id="silenceMiddleKeepSeconds" type="number" readonly />
-                </div>
-              </div>
-              <div class="field">
-                <label class="inline-check standalone"><input id="videoSpeedEnabled" type="checkbox" /><span>启用最终倍速</span></label>
-                <p class="hint">倍速会在剪辑气口之后、添加 BGM 和音效之前执行，所以数字人声音会变速，BGM/音效不会被变速。</p>
-              </div>
-              <div class="field">
-                <label>倍速倍率</label>
-                <input id="videoSpeedRate" type="number" min="0.5" max="2" step="0.05" />
-              </div>
             </div>
           </div>
         </section>

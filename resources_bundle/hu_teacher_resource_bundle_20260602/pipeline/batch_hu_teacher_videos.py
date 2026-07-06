@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import difflib
+import gc
 import hashlib
 import json
 import os
@@ -28,6 +29,7 @@ BASE_URL = "https://www.chanjing.cc/api"
 _AUDIO_EXTS = {".aac", ".m4a", ".mp3", ".wav"}
 _IMAGE_EXTS = {".jpeg", ".jpg", ".png", ".webp"}
 _VIDEO_EXTS = {".avi", ".m4v", ".mkv", ".mov", ".mp4", ".webm"}
+_WHISPER_FORCE_CPU_FOR_RUN = False
 
 
 def _first_existing(*paths):
@@ -2130,6 +2132,59 @@ def title_lines(hook_sentences):
     return red, yellow, blue
 
 
+def _clear_cuda_cache(torch_module):
+    gc.collect()
+    try:
+        if torch_module.cuda.is_available():
+            torch_module.cuda.empty_cache()
+            try:
+                torch_module.cuda.ipc_collect()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _is_cuda_out_of_memory(exc):
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return (
+        "cuda" in text
+        and (
+            "out of memory" in text
+            or "memoryallocation" in text
+            or "memory allocation" in text
+        )
+    )
+
+
+def _whisper_device_candidates(torch_module):
+    forced = (os.environ.get("HU_TEACHER_WHISPER_DEVICE") or os.environ.get("WHISPER_DEVICE") or "").strip().lower()
+    if forced in {"cpu", "cuda"}:
+        return [forced]
+    if _WHISPER_FORCE_CPU_FOR_RUN:
+        return ["cpu"]
+    return ["cuda", "cpu"] if torch_module.cuda.is_available() else ["cpu"]
+
+
+def _run_whisper_transcribe(whisper_module, torch_module, raw_video, device):
+    model = None
+    try:
+        model = whisper_module.load_model("small", device=device)
+        return model.transcribe(
+            str(raw_video),
+            language="Chinese",
+            fp16=device == "cuda",
+            verbose=False,
+            word_timestamps=True,
+            condition_on_previous_text=False,
+        )
+    finally:
+        if model is not None:
+            del model
+        if device == "cuda":
+            _clear_cuda_cache(torch_module)
+
+
 def load_or_transcribe(raw_video, json_path):
     if json_path.exists():
         data = json.loads(json_path.read_text(encoding="utf-8"))
@@ -2138,18 +2193,24 @@ def load_or_transcribe(raw_video, json_path):
     import whisper
     import torch
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = whisper.load_model("small", device=device)
-    result = model.transcribe(
-        str(raw_video),
-        language="Chinese",
-        fp16=device == "cuda",
-        verbose=False,
-        word_timestamps=True,
-        condition_on_previous_text=False,
-    )
-    json_path.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
-    return result
+    global _WHISPER_FORCE_CPU_FOR_RUN
+    last_error = None
+    for device in _whisper_device_candidates(torch):
+        try:
+            result = _run_whisper_transcribe(whisper, torch, raw_video, device)
+            json_path.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+            return result
+        except Exception as exc:
+            if device == "cuda" and _is_cuda_out_of_memory(exc):
+                last_error = exc
+                _WHISPER_FORCE_CPU_FOR_RUN = True
+                _clear_cuda_cache(torch)
+                print("Whisper CUDA 显存不足，已自动切换 CPU 重新识别；本次批量后续任务也会继续使用 CPU。", file=sys.stderr)
+                continue
+            raise
+    if last_error:
+        raise last_error
+    raise RuntimeError("Whisper 转写失败：没有可用的识别设备")
 
 
 def clean_for_align(text):

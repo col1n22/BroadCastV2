@@ -1075,14 +1075,14 @@ th {
 }
 
 .style-settings-grid {
-  display: block;
-  column-count: 2;
-  column-gap: 20px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  align-items: start;
 }
 
 .style-settings-grid > .settings-card {
-  break-inside: avoid;
-  margin: 0 0 20px;
+  margin: 0;
 }
 
 .settings-card {
@@ -1984,7 +1984,7 @@ th {
   }
 
   .style-settings-grid {
-    column-count: 1;
+    grid-template-columns: 1fr;
   }
 
   .silence-trim-grid {
@@ -2037,11 +2037,11 @@ th {
   }
 
   .style-settings-grid {
-    column-gap: 18px;
+    gap: 18px;
   }
 
   .style-settings-grid > .settings-card {
-    margin-bottom: 18px;
+    margin-bottom: 0;
   }
 
   .style-settings-grid .settings-card h3 {
