@@ -107,7 +107,7 @@ function defaultSettings() {
     chanjingAssetOverrides: {},
     accountTemplates: {},
     accountAssetTemplates: {},
-    modelBaseUrl: '',
+    modelBaseUrl: 'https://api.supremelife.xyz/v1',
     modelApiKey: '',
     modelName: '',
     sensitiveReplacementRules: '医=醫\n药=藥\n病=疒\n血=皿\n手术=手S',
@@ -336,9 +336,21 @@ function remapSettingsPaths(value, bundlePath = bundledBundlePath()) {
   return value;
 }
 
+function normalizeModelBaseUrl(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return 'https://api.supremelife.xyz/v1';
+  }
+  return text.replace(
+    /^(https?:\/\/)?hk-api\.supremelife\.xyz(?=\/|$)/i,
+    (match, protocol) => `${protocol || 'https://'}api.supremelife.xyz`
+  );
+}
+
 function normalizeLoadedSettings(saved) {
   const merged = { ...defaultSettings(), ...(saved || {}) };
   const remapped = remapSettingsPaths(merged, bundledBundlePath());
+  remapped.modelBaseUrl = normalizeModelBaseUrl(remapped.modelBaseUrl);
   if (saved?.useSfxFile === undefined && saved?.sfxMode === 'fixed') {
     remapped.useSfxFile = true;
   }
