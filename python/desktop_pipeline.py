@@ -4,6 +4,7 @@ import argparse
 import base64
 import hashlib
 import html
+import http.client
 import json
 import math
 import os
@@ -2951,9 +2952,17 @@ def chat_completion(settings, messages):
         except (TimeoutError, socket.timeout) as exc:
             if attempt >= max_attempts - 1:
                 raise RuntimeError(f"model API request timed out after {timeout_seconds}s") from exc
+        except (http.client.RemoteDisconnected, http.client.BadStatusLine, ConnectionResetError, ConnectionAbortedError) as exc:
+            if attempt >= max_attempts - 1:
+                raise RuntimeError(f"model API connection closed without response: {exc}") from exc
         except urllib.error.URLError as exc:
             reason = getattr(exc, "reason", None)
-            retryable = isinstance(reason, (TimeoutError, socket.timeout)) or "timed out" in str(reason).lower()
+            retryable = (
+                isinstance(reason, (TimeoutError, socket.timeout, http.client.RemoteDisconnected, ConnectionResetError, ConnectionAbortedError))
+                or "timed out" in str(reason).lower()
+                or "closed connection" in str(reason).lower()
+                or "connection reset" in str(reason).lower()
+            )
             if not retryable or attempt >= max_attempts - 1:
                 raise
         time.sleep(retry_delays[min(attempt, len(retry_delays) - 1)])
