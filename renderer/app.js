@@ -3549,7 +3549,7 @@ function applyTemplateManagerAccountFilter() {
       visibleCount += 1;
       row.classList.add(visibleCount % 2 === 0 ? 'asset-row-even' : 'asset-row-odd');
       const label = row.querySelector('[data-template-row-label]');
-      if (label) label.textContent = `模板${visibleCount}`;
+      if (label) label.textContent = `序号${visibleCount}`;
     }
   });
   if (!visibleCount) {
@@ -3612,8 +3612,49 @@ function templateRowsForAccountInManager(accountIndex) {
     .filter((row) => Number(row.dataset.templateAccountIndex || 0) === account);
 }
 
+function templateRowName(row) {
+  return String(
+    row?.querySelector('[data-template-name]')?.value ||
+    row?.querySelector('[data-template-name-view]')?.textContent ||
+    ''
+  ).trim();
+}
+
 function nextTemplateNameForAccount(accountIndex) {
   return `模板${templateRowsForAccountInManager(accountIndex).length + 1}`;
+}
+
+function uniqueTemplateName(baseName, existingNames = [], fallback = '模板') {
+  const base = String(baseName || fallback || '模板').trim() || '模板';
+  const used = new Set(existingNames.map((name) => String(name || '').trim()).filter(Boolean));
+  if (!used.has(base)) return base;
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${base}-${index}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return `${base}-${Date.now().toString(36)}`;
+}
+
+function templateNameFromAsset(assetIndex, fallback = '模板') {
+  const asset = enabledAssetByIndex(assetIndex);
+  return asset ? digitalAssetName(asset) : fallback;
+}
+
+function nextTemplateNameForAssetInManager(accountIndex, assetIndex) {
+  const rows = templateRowsForAccountInManager(accountIndex);
+  return uniqueTemplateName(
+    templateNameFromAsset(assetIndex, nextTemplateNameForAccount(accountIndex)),
+    rows.map(templateRowName),
+    nextTemplateNameForAccount(accountIndex)
+  );
+}
+
+function nextTemplateNameForAssetInList(assetIndex, list = []) {
+  return uniqueTemplateName(
+    templateNameFromAsset(assetIndex, `模板${list.length + 1}`),
+    list.map((template) => template?.name),
+    `模板${list.length + 1}`
+  );
 }
 
 function resetAssetManagerTemplateName(force = false) {
@@ -3626,7 +3667,8 @@ function resetAssetManagerTemplateName(force = false) {
     input.dataset.autofilled = 'true';
     return;
   }
-  const nextName = nextTemplateNameForAccount(accountIndex);
+  const assetIndex = Number($('assetManagerSourceAssetIndex')?.value || settings.templateSourceAssetIndex || settings.chanjingAssetIndex || 0);
+  const nextName = nextTemplateNameForAssetInManager(accountIndex, assetIndex);
   input.placeholder = nextName;
   if (force || input.dataset.autofilled !== 'false' || !input.value.trim()) {
     input.value = nextName;
@@ -3864,18 +3906,19 @@ function appendTemplateManagerRow(template, index, accountIndex = templateManage
 
   const label = document.createElement('span');
   label.dataset.templateRowLabel = 'true';
-  label.textContent = `模板${index + 1}`;
+  label.textContent = `序号${index + 1}`;
 
   const nameCell = document.createElement('div');
   nameCell.className = 'rename-name-cell';
+  const displayName = String(template.name || templateNameFromAsset(template.assetIndex, `模板${index + 1}`)).trim() || `模板${index + 1}`;
   const nameView = document.createElement('span');
   nameView.className = 'rename-name-view';
   nameView.dataset.templateNameView = 'true';
-  nameView.textContent = template.name || `模板${index + 1}`;
+  nameView.textContent = displayName;
   const name = document.createElement('input');
   name.dataset.templateName = 'true';
-  name.value = template.name || `模板${index + 1}`;
-  name.placeholder = `模板${index + 1}`;
+  name.value = displayName;
+  name.placeholder = displayName;
   name.hidden = !editing;
   nameView.hidden = editing;
   nameCell.appendChild(nameView);
@@ -3914,7 +3957,11 @@ function setTemplateRenameEditing(row, editing) {
   if (!row) return;
   const rows = Array.from(document.querySelectorAll('#assetList [data-template-id]'));
   const index = rows.indexOf(row);
-  const fallback = `模板${index + 1 || rows.length + 1}`;
+  const fallback = uniqueTemplateName(
+    templateNameFromAsset(Number(row.dataset.templateAssetIndex || 0), `模板${index + 1 || rows.length + 1}`),
+    rows.filter((item) => item !== row).map(templateRowName),
+    `模板${index + 1 || rows.length + 1}`
+  );
   const input = row.querySelector('[data-template-name]');
   const view = row.querySelector('[data-template-name-view]');
   const button = row.querySelector('[data-template-rename]');
@@ -3956,6 +4003,7 @@ async function addAllTemplateRowsInManager(targetAccount) {
   );
   let totalCount = rows.length;
   let accountCount = targetRows.length;
+  const existingNames = targetRows.map(templateRowName);
   let added = 0;
   let skipped = 0;
   assets.forEach((asset) => {
@@ -3965,15 +4013,17 @@ async function addAllTemplateRowsInManager(targetAccount) {
       skipped += 1;
       return;
     }
+    const templateName = uniqueTemplateName(digitalAssetName(asset), existingNames, `模板${accountCount + 1}`);
     appendTemplateManagerRow({
       id: newTemplateId(),
-      name: `模板${accountCount + 1}`,
+      name: templateName,
       assetIndex,
       enabled: true,
       isNew: true,
       config: newTemplateDefaultConfig()
     }, totalCount, targetAccount);
     existingAssetIndexes.add(assetIndex);
+    existingNames.push(templateName);
     totalCount += 1;
     accountCount += 1;
     added += 1;
@@ -4023,8 +4073,7 @@ async function addTemplateRowInManager() {
   list.querySelector('.empty-account')?.remove();
   const rows = Array.from(list.querySelectorAll('[data-template-id]'));
   const count = rows.length;
-  const accountCount = rows.filter((row) => Number(row.dataset.templateAccountIndex || 0) === targetAccount).length;
-  const defaultName = `模板${accountCount + 1}`;
+  const defaultName = nextTemplateNameForAssetInManager(targetAccount, assetIndex);
   const templateName = String($('assetManagerTemplateName')?.value || '').trim() || defaultName;
   appendTemplateManagerRow({
     id: newTemplateId(),
@@ -4088,11 +4137,12 @@ function templateManagerTemplatesByAccount() {
     const template = {
       ...original,
       id,
-      name: row.querySelector('[data-template-name]')?.value?.trim() || `模板${positions[accountIndex]}`,
       enabled: true,
       assetIndex: Number(row.dataset.templateAssetIndex || original.assetIndex || 1),
       config: original.config || templateManagerDraftConfigs.get(id) || newTemplateDefaultConfig()
     };
+    template.name = row.querySelector('[data-template-name]')?.value?.trim() ||
+      templateNameFromAsset(template.assetIndex, `模板${positions[accountIndex]}`);
     if (!grouped[accountIndex]) grouped[accountIndex] = [];
     grouped[accountIndex].push(template);
   });
@@ -4248,9 +4298,10 @@ async function addTemplateFromSelectedAsset() {
   const account = Math.max(1, Number(settings.chanjingAccountIndex || 1));
   const accountTemplates = normalizeAccountTemplates(settings.accountTemplates);
   const list = accountTemplates[account] || [];
+  const templateName = nextTemplateNameForAssetInList(assetIndex, list);
   const template = {
     id: newTemplateId(),
-    name: `模板${list.length + 1}`,
+    name: templateName,
     assetIndex,
     enabled: true,
     config: newTemplateDefaultConfig()
@@ -5832,6 +5883,7 @@ async function init() {
   $('btnCloseAssetAddModal')?.addEventListener('click', closeAddTemplateModal);
   $('btnCancelAssetManagerAdd')?.addEventListener('click', closeAddTemplateModal);
   $('assetManagerSourceAssetIndex')?.addEventListener('change', () => {
+    resetAssetManagerTemplateName(false);
     updateAssetManagerSourcePreview();
     updateAssetManagerAddButtonState();
   });
