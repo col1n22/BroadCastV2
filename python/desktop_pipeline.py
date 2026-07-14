@@ -2802,9 +2802,17 @@ def build_full_screen_pip_effect_events(settings, timed_units, duration, title_e
         return []
 
     blocked_sentence_indices = set(blocked_sentence_indices or [])
+    cta_starts = [
+        float(unit.get("start", 0.0))
+        for unit in timed_units
+        if unit.get("source") == "cta"
+    ]
+    cta_start = min(cta_starts) if cta_starts else None
     for group in timed_sentence_groups(timed_units):
         sentence_index = group.get("sentence_index")
         if sentence_index in blocked_sentence_indices:
+            continue
+        if any(unit.get("source") == "cta" for unit in group.get("units") or []):
             continue
         sentence_text = group.get("text", "")
         sentence_start = float(group.get("start", 0.0))
@@ -2831,6 +2839,8 @@ def build_full_screen_pip_effect_events(settings, timed_units, duration, title_e
             )
             start = max(float(title_end or 0.0) + 0.05, clause_start)
             end = full_screen_pip_event_end(settings, start, clause_end, duration)
+            if cta_start is not None:
+                end = min(end, cta_start)
             visual = {
                 "source": str(source),
                 "start": round(start, 3),
@@ -5218,6 +5228,7 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             "fullscreen_pip_duration_seconds": f"{full_screen_pip_duration_seconds(settings):.3f}",
             "fullscreen_pip_close_at_clause_end": full_screen_pip_close_at_clause_end(settings),
             "fullscreen_pip_horizontal_aspect_mode": full_screen_pip_horizontal_aspect_mode(settings),
+            "fullscreen_pip_cta_policy": "disabled",
             "effect_priority_policy": "user_configured_0_to_10_lower_number_wins",
             "effect_conflict_policy": "skip_whole_lower_priority_event",
             "priority_title_motion": setting_priority(settings, "titleMotionPriority"),
