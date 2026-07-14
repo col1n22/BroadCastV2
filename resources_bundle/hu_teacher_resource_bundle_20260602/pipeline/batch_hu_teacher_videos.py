@@ -129,6 +129,12 @@ def _direct_files(path, suffixes):
     return [child for child in path.iterdir() if child.is_file() and child.suffix.lower() in suffixes]
 
 
+def _recursive_files(path, suffixes):
+    if not path.exists():
+        return []
+    return [child for child in path.rglob("*") if child.is_file() and child.suffix.lower() in suffixes]
+
+
 def _asset_dir_matching(predicate, fallback_name):
     if ASSET_ROOT.exists():
         for path in ASSET_ROOT.iterdir():
@@ -210,22 +216,22 @@ BACKGROUND_MATERIAL_DIR = Path("/Users/cjj/素材/背景")
 
 BGM_DIR = ASSET_ROOT / "BGM"
 KEYWORD_SFX_DIR = _asset_dir_matching(
-    lambda path: path.name.lower() not in {"bgm", "template_assets"} and bool(_direct_files(path, _AUDIO_EXTS)),
+    lambda path: path.name.lower() not in {"bgm", "template_assets"} and bool(_recursive_files(path, _AUDIO_EXTS)),
     "keyword_sfx",
 )
 REMOTION_EFFECTS_DIR = ASSET_ROOT / "remotion_effects"
 REMOTION_PUBLIC_DIR = REMOTION_EFFECTS_DIR / "public"
 CHROME_EXECUTABLE = _chrome_executable()
 PIP_MATERIAL_DIR = _asset_dir_matching(
-    lambda path: any(file.name.upper().startswith("DJI_") for file in _direct_files(path, _VIDEO_EXTS)),
+    lambda path: any(file.name.upper().startswith("DJI_") for file in _recursive_files(path, _VIDEO_EXTS)),
     "pip_materials",
 )
 ISLET_MATERIAL_DIR = _asset_dir_matching(
-    lambda path: any(not file.name.upper().startswith("DJI_") for file in _direct_files(path, _VIDEO_EXTS)),
+    lambda path: any(not file.name.upper().startswith("DJI_") for file in _recursive_files(path, _VIDEO_EXTS)),
     "islet",
 )
 BACKGROUND_MATERIAL_DIR = _asset_dir_matching(
-    lambda path: path.name not in {"remotion_effects", "template_assets"} and bool(_direct_files(path, _IMAGE_EXTS)),
+    lambda path: path.name not in {"remotion_effects", "template_assets"} and bool(_recursive_files(path, _IMAGE_EXTS)),
     "background",
 )
 NODE_EXECUTABLE = _node_executable()
@@ -2860,7 +2866,7 @@ def keyword_sfx_files():
     if not KEYWORD_SFX_DIR.exists():
         return []
     return sorted(
-        path for path in KEYWORD_SFX_DIR.glob("*")
+        path for path in KEYWORD_SFX_DIR.rglob("*")
         if path.is_file() and path.suffix.lower() in KEYWORD_SFX_EXTS
     )
 
@@ -2873,7 +2879,7 @@ def tighten_and_mix(input_path, final_path, report_path, title_end, keyword_effe
     keep, cuts = build_keep_segments(total, silences)
     render_tight_no_bgm(input_path, no_bgm, keep)
     bgm_start = map_original_to_tight(title_end, keep)
-    bgms = sorted(BGM_DIR.glob("*.mp3"))
+    bgms = sorted(path for path in BGM_DIR.rglob("*.mp3") if path.is_file())
     if not bgms:
         raise SystemExit(f"bgm library is empty: {BGM_DIR}")
     bgm_path = random.choice(bgms)

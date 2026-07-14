@@ -925,6 +925,46 @@ ipcMain.handle('dialog:directory', async () => {
   return result.canceled ? null : result.filePaths[0];
 });
 
+function recursiveMediaFiles(rootPath, extensions = []) {
+  const allowed = new Set(
+    (Array.isArray(extensions) ? extensions : [])
+      .map((extension) => String(extension || '').trim().toLowerCase().replace(/^\./, ''))
+      .filter(Boolean)
+  );
+  const files = [];
+  const pending = [rootPath];
+  while (pending.length) {
+    const current = pending.pop();
+    let entries = [];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch (_error) {
+      continue;
+    }
+    entries.forEach((entry) => {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(entryPath);
+        return;
+      }
+      if (!entry.isFile()) return;
+      const extension = path.extname(entry.name).slice(1).toLowerCase();
+      if (!allowed.size || allowed.has(extension)) files.push(entryPath);
+    });
+  }
+  return files.sort((left, right) => left.localeCompare(right, 'zh-CN', { numeric: true }));
+}
+
+ipcMain.handle('dialog:media-directory', async (_event, options = {}) => {
+  const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
+  if (result.canceled || !result.filePaths?.[0]) return null;
+  const directoryPath = result.filePaths[0];
+  return {
+    directoryPath,
+    filePaths: recursiveMediaFiles(directoryPath, options.extensions)
+  };
+});
+
 ipcMain.handle('json:summary', async (_event, filePath) => {
   return jsonSummary(readJsonFile(filePath));
 });

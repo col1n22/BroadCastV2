@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('huApp', {
   importSettings: () => ipcRenderer.invoke('settings:import'),
   chooseFile: (options) => ipcRenderer.invoke('dialog:file', options),
   chooseDirectory: () => ipcRenderer.invoke('dialog:directory'),
+  chooseMediaDirectory: (options) => ipcRenderer.invoke('dialog:media-directory', options),
   readJsonSummary: (filePath) => ipcRenderer.invoke('json:summary', filePath),
   saveCustomText: (payload) => ipcRenderer.invoke('customText:save', payload),
   listChanjingAssets: (settings) => ipcRenderer.invoke('chanjing:assets', settings),

@@ -1139,6 +1139,7 @@ const mediaLibraryConfigs = {
     listId: 'bgmLibraryList',
     countId: 'bgmLibraryCount',
     importButtonId: 'btnImportBgmLibrary',
+    importFolderButtonId: 'btnImportBgmLibraryFolder',
     selectId: 'bgmLibrarySelect',
     fileFieldId: 'bgmFile',
     label: 'BGM',
@@ -1152,6 +1153,7 @@ const mediaLibraryConfigs = {
     listId: 'sfxLibraryList',
     countId: 'sfxLibraryCount',
     importButtonId: 'btnImportSfxLibrary',
+    importFolderButtonId: 'btnImportSfxLibraryFolder',
     selectId: 'sfxLibrarySelect',
     fileFieldId: 'sfxFile',
     label: '音效',
@@ -1164,6 +1166,7 @@ const mediaLibraryConfigs = {
     listId: 'openingVideoLibraryList',
     countId: 'openingVideoLibraryCount',
     importButtonId: 'btnImportOpeningVideoLibrary',
+    importFolderButtonId: 'btnImportOpeningVideoLibraryFolder',
     selectId: 'openingVideoLibrarySelect',
     fileFieldId: 'openingVideoFile',
     label: '开头视频',
@@ -1176,6 +1179,7 @@ const mediaLibraryConfigs = {
     listId: 'pipMaterialLibraryList',
     countId: 'pipMaterialLibraryCount',
     importButtonId: 'btnImportPipMaterialLibrary',
+    importFolderButtonId: 'btnImportPipMaterialLibraryFolder',
     selectId: 'pipMaterialLibrarySelect',
     fileFieldId: 'pipMaterialFile',
     label: '画中画素材',
@@ -1326,6 +1330,25 @@ async function importMediaLibrary(kind) {
   ], config.extensions);
   settings[config.settingKey] = next;
   renderMediaLibrary(kind);
+}
+
+async function importMediaLibraryFolder(kind) {
+  const config = mediaLibraryConfigs[kind];
+  if (!config) return;
+  const selected = await window.huApp.chooseMediaDirectory({ extensions: config.extensions });
+  if (!selected?.directoryPath) return;
+  const paths = Array.isArray(selected.filePaths) ? selected.filePaths : [];
+  if (!paths.length) {
+    appendLog(`[${config.label}库] 文件夹及其子文件夹中没有支持的素材：${selected.directoryPath}\n`, true);
+    return;
+  }
+  const next = normalizeMediaLibrary([
+    ...collectMediaLibraryFromUi(kind),
+    ...paths.map((mediaPath) => ({ path: mediaPath }))
+  ], config.extensions);
+  settings[config.settingKey] = next;
+  renderMediaLibrary(kind);
+  appendLog(`[${config.label}库] 已从文件夹递归导入 ${paths.length} 个素材：${selected.directoryPath}\n`);
 }
 
 function fontLibraryWithCurrentPath(currentPath) {
@@ -5430,6 +5453,7 @@ async function init() {
   });
   Object.entries(mediaLibraryConfigs).forEach(([kind, config]) => {
     $(config.importButtonId)?.addEventListener('click', () => importMediaLibrary(kind));
+    $(config.importFolderButtonId)?.addEventListener('click', () => importMediaLibraryFolder(kind));
     $(config.listId)?.addEventListener('click', (event) => {
       const remove = event.target.closest('[data-media-library-remove]');
       if (!remove) return;

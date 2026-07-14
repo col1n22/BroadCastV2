@@ -508,6 +508,13 @@ textarea {
   margin-top: 12px;
 }
 
+.media-library-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .pip-rule-list,
 .text-effect-keyword-rule-list {
   display: grid;

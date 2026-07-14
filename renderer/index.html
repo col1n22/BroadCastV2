@@ -754,7 +754,10 @@
                     <h4>BGM库</h4>
                     <p class="hint">导入后可固定选择，也可以让每条从库里随机。</p>
                   </div>
-                  <button id="btnImportBgmLibrary" class="button secondary small" type="button">导入 BGM</button>
+                  <div class="media-library-import-actions">
+                    <button id="btnImportBgmLibrary" class="button secondary small" type="button">导入文件</button>
+                    <button id="btnImportBgmLibraryFolder" class="button secondary small" type="button">导入文件夹</button>
+                  </div>
                 </div>
                 <div class="font-library-meta">
                   <span id="bgmLibraryCount">0 个BGM</span>
@@ -789,7 +792,10 @@
                     <h4>音效库</h4>
                     <p class="hint">不勾选使用指定时，花字/关键词音效会从音效库随机选择。</p>
                   </div>
-                  <button id="btnImportSfxLibrary" class="button secondary small" type="button">导入音效</button>
+                  <div class="media-library-import-actions">
+                    <button id="btnImportSfxLibrary" class="button secondary small" type="button">导入文件</button>
+                    <button id="btnImportSfxLibraryFolder" class="button secondary small" type="button">导入文件夹</button>
+                  </div>
                 </div>
                 <div class="font-library-meta">
                   <span id="sfxLibraryCount">0 个音效</span>
@@ -833,7 +839,10 @@
                     <h4>开头视频库</h4>
                     <p class="hint">标题动画开启后，不勾选使用指定时会从库里随机选择。</p>
                   </div>
-                  <button id="btnImportOpeningVideoLibrary" class="button secondary small" type="button">导入开头视频</button>
+                  <div class="media-library-import-actions">
+                    <button id="btnImportOpeningVideoLibrary" class="button secondary small" type="button">导入文件</button>
+                    <button id="btnImportOpeningVideoLibraryFolder" class="button secondary small" type="button">导入文件夹</button>
+                  </div>
                 </div>
                 <div class="font-library-meta">
                   <span id="openingVideoLibraryCount">0 个开头视频</span>
@@ -900,9 +909,12 @@
                 <div class="section-row">
                   <div>
                     <h4>画中画素材库</h4>
-                    <p class="hint">不勾选使用指定时，关键词画中画会从素材库随机选择。</p>
+                    <p class="hint">不勾选使用指定时，关键词画中画会在每批任务内随机轮换，全部用过一遍前不重复。</p>
                   </div>
-                  <button id="btnImportPipMaterialLibrary" class="button secondary small" type="button">导入素材</button>
+                  <div class="media-library-import-actions">
+                    <button id="btnImportPipMaterialLibrary" class="button secondary small" type="button">导入文件</button>
+                    <button id="btnImportPipMaterialLibraryFolder" class="button secondary small" type="button">导入文件夹</button>
+                  </div>
                 </div>
                 <div class="font-library-meta">
                   <span id="pipMaterialLibraryCount">0 个画中画素材</span>

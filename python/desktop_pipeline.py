@@ -67,6 +67,7 @@ DEFAULT_EFFECT_PRIORITY = 5
 TEXT_EFFECT_IDS = ("kinetic", "slide-reveal", "word-bounce", "spring-up", "bubble")
 MAX_TEXT_EFFECT_EVENTS = 3
 TEXT_EFFECT_ANIMATION_RATIO = 2 / 3
+_MEDIA_ROTATION_POOLS = {}
 SELF_INTRO_MIN_SECONDS = 3.5
 DEFAULT_SENSITIVE_REPLACEMENT_RULES = "医=醫\n药=藥\n病=疒\n血=皿\n手术=手S"
 
@@ -1129,6 +1130,45 @@ def media_files(folder, extensions):
     )
 
 
+def unique_media_paths(paths):
+    result = []
+    seen = set()
+    for path in paths:
+        path = Path(path)
+        key = str(path.resolve()).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(path)
+    return result
+
+
+def rotating_media_choice(paths):
+    candidates = unique_media_paths(paths)
+    if not candidates:
+        return None
+    keys = [str(path.resolve()).lower() for path in candidates]
+    pool_key = tuple(sorted(keys))
+    state = _MEDIA_ROTATION_POOLS.setdefault(pool_key, {"queue": [], "last": ""})
+    if not state["queue"]:
+        queue = list(candidates)
+        random.shuffle(queue)
+        if len(queue) > 1 and state["last"] and str(queue[-1].resolve()).lower() == state["last"]:
+            queue[0], queue[-1] = queue[-1], queue[0]
+        state["queue"] = queue
+    selected = state["queue"].pop()
+    state["last"] = str(selected.resolve()).lower()
+    return selected
+
+
+def library_and_folder_media(settings, library_key, folder_key, extensions):
+    library = media_library_paths(settings, library_key, extensions)
+    folder_value = str(settings.get(folder_key) or "").strip()
+    folder = Path(folder_value) if folder_value else None
+    folder_files = media_files(folder, extensions) if folder and folder.exists() else []
+    return unique_media_paths([*library, *folder_files]), library, folder
+
+
 def media_library_paths(settings, key, extensions):
     raw = settings.get(key)
     if isinstance(raw, str):
@@ -1180,17 +1220,15 @@ def choose_opening_video(settings):
         path = Path(require(settings.get("openingVideoFile"), "指定开头视频文件"))
         return validate_media_file(path, "指定开头视频文件", VIDEO_EXTS), "fixed"
 
-    library = media_library_paths(settings, "openingVideoLibrary", VIDEO_EXTS)
-    if library:
-        return random.choice(library), "library"
-
-    folder = Path(require(settings.get("openingVideoFolder"), "开头视频文件夹"))
-    if not folder.exists():
+    candidates, library, folder = library_and_folder_media(
+        settings, "openingVideoLibrary", "openingVideoFolder", VIDEO_EXTS
+    )
+    if folder and not folder.exists() and not library:
         raise SystemExit(f"开头视频文件夹不存在：{folder}")
-    candidates = media_files(folder, VIDEO_EXTS)
     if not candidates:
-        raise SystemExit(f"开头视频文件夹里没有可用视频：{folder}")
-    return random.choice(candidates), "random"
+        raise SystemExit(f"开头视频素材库和文件夹里没有可用视频：{folder or ''}")
+    mode = "library_and_folder" if library and folder and folder.exists() else ("library" if library else "random")
+    return random.choice(candidates), mode
 
 
 def choose_pip_sources(settings):
@@ -1198,16 +1236,13 @@ def choose_pip_sources(settings):
         path = Path(require(settings.get("pipMaterialFile"), "指定画中画素材文件"))
         return [validate_media_file(path, "指定画中画素材文件", PIP_MEDIA_EXTS)]
 
-    library = media_library_paths(settings, "pipMaterialLibrary", PIP_MEDIA_EXTS)
-    if library:
-        return library
-
-    folder = Path(require(settings.get("pipFolder"), "画中画文件夹"))
-    if not folder.exists():
+    candidates, library, folder = library_and_folder_media(
+        settings, "pipMaterialLibrary", "pipFolder", PIP_MEDIA_EXTS
+    )
+    if folder and not folder.exists() and not library:
         raise SystemExit(f"画中画文件夹不存在：{folder}")
-    candidates = media_files(folder, PIP_MEDIA_EXTS)
     if not candidates:
-        raise SystemExit(f"画中画文件夹里没有可用素材：{folder}")
+        raise SystemExit(f"画中画素材库和文件夹里没有可用素材：{folder or ''}")
     return candidates
 
 
@@ -1262,17 +1297,11 @@ def pip_rule_items(settings):
 
 
 def choose_self_intro_sources(settings):
-    library = media_library_paths(settings, "pipMaterialLibrary", PIP_MEDIA_EXTS)
-    if library:
-        return library
-
-    folder_value = str(settings.get("pipFolder") or "").strip()
-    if folder_value:
-        folder = Path(folder_value)
-        if folder.exists():
-            candidates = media_files(folder, PIP_MEDIA_EXTS)
-            if candidates:
-                return candidates
+    candidates, _library, _folder = library_and_folder_media(
+        settings, "pipMaterialLibrary", "pipFolder", PIP_MEDIA_EXTS
+    )
+    if candidates:
+        return candidates
 
     pip_sources = getattr(batch, "pip_sources", None)
     material_dir = getattr(batch, "PIP_MATERIAL_DIR", None)
@@ -1357,22 +1386,19 @@ def choose_text_effect_sfx(settings):
         path = Path(require(settings.get("sfxFile"), "指定音效文件"))
         return validate_media_file(path, "指定音效文件", AUDIO_EXTS), "fixed"
 
-    library = media_library_paths(settings, "sfxLibrary", AUDIO_EXTS)
-    if library:
-        return random.choice(library), "library"
-
-    folder_value = str(settings.get("sfxFolder") or "").strip()
-    if not folder_value:
+    candidates, library, folder = library_and_folder_media(
+        settings, "sfxLibrary", "sfxFolder", AUDIO_EXTS
+    )
+    if not candidates and not folder:
         return None, "none"
-    folder = Path(folder_value)
-    if not folder.exists():
+    if folder and not folder.exists() and not library:
         log_json("text_effect_sfx_folder_missing", folder=str(folder))
         return None, "missing"
-    candidates = media_files(folder, AUDIO_EXTS)
     if not candidates:
         log_json("text_effect_sfx_empty", folder=str(folder))
         return None, "empty"
-    return random.choice(candidates), "random"
+    mode = "library_and_folder" if library and folder and folder.exists() else ("library" if library else "random")
+    return random.choice(candidates), mode
 
 
 def choose_logo_file(settings):
@@ -2494,7 +2520,7 @@ def build_keyword_pip_events(settings, timed_units, duration, title_end, sources
         duration,
         title_end,
         term_items,
-        lambda _item, _unit: random.choice(sources),
+        lambda _item, _unit: rotating_media_choice(sources),
         "keyword_pip",
         blocked_sentence_indices=blocked_sentence_indices,
     )
@@ -2515,7 +2541,7 @@ def build_rule_pip_events(settings, timed_units, duration, title_end, rules=None
         duration,
         title_end,
         term_items,
-        lambda item, _unit: random.choice(item.get("sources") or []),
+        lambda item, _unit: rotating_media_choice(item.get("sources") or []),
         "keyword_pip_rule",
         blocked_sentence_indices=blocked_sentence_indices,
     )
@@ -2537,7 +2563,7 @@ def build_self_intro_pip_effect_events(settings, timed_units, duration, title_en
             continue
         if not self_intro_text_matches(group.get("text", "")):
             continue
-        source = random.choice(sources)
+        source = rotating_media_choice(sources)
         start = max(float(group["start"]), float(title_end or 0.0))
         end = pip_event_end(settings, start, float(group["end"]), duration)
         pip = batch.make_pip_event(
