@@ -1167,6 +1167,7 @@ const mediaLibraryConfigs = {
     importFolderButtonId: 'btnImportSfxLibraryFolder',
     selectId: 'sfxLibrarySelect',
     fileFieldId: 'sfxFile',
+    useFixedFieldId: 'useSfxFile',
     label: '音效',
     emptyText: '还没有导入音效',
     filterName: 'Audio',
@@ -1180,6 +1181,7 @@ const mediaLibraryConfigs = {
     importFolderButtonId: 'btnImportOpeningVideoLibraryFolder',
     selectId: 'openingVideoLibrarySelect',
     fileFieldId: 'openingVideoFile',
+    useFixedFieldId: 'useOpeningVideoFile',
     label: '开头视频',
     emptyText: '还没有导入开头视频',
     filterName: 'Video',
@@ -1193,6 +1195,7 @@ const mediaLibraryConfigs = {
     importFolderButtonId: 'btnImportPipMaterialLibraryFolder',
     selectId: 'pipMaterialLibrarySelect',
     fileFieldId: 'pipMaterialFile',
+    useFixedFieldId: 'usePipMaterialFile',
     label: '画中画素材',
     emptyText: '还没有导入画中画素材',
     filterName: 'Media',
@@ -1206,6 +1209,7 @@ const mediaLibraryConfigs = {
     importFolderButtonId: 'btnImportFullScreenPipMaterialLibraryFolder',
     selectId: 'fullScreenPipMaterialLibrarySelect',
     fileFieldId: 'fullScreenPipMaterialFile',
+    useFixedFieldId: 'useFullScreenPipMaterialFile',
     label: '全屏画中画素材',
     emptyText: '还没有导入全屏画中画素材',
     filterName: 'Media',
@@ -5509,8 +5513,14 @@ async function init() {
     });
     $(config.selectId)?.addEventListener('change', () => {
       const target = $(config.fileFieldId);
-      if (target) target.value = $(config.selectId).value;
-      settings[config.fileFieldId] = $(config.selectId).value;
+      const selectedPath = $(config.selectId).value;
+      if (target) target.value = selectedPath;
+      settings[config.fileFieldId] = selectedPath;
+      if (selectedPath && config.useFixedFieldId) {
+        const fixedToggle = $(config.useFixedFieldId);
+        if (fixedToggle) fixedToggle.checked = true;
+        settings[config.useFixedFieldId] = true;
+      }
     });
     $(config.fileFieldId)?.addEventListener('input', () => {
       renderMediaLibrarySelect(kind);
@@ -5837,18 +5847,23 @@ async function init() {
 
   document.querySelectorAll('[data-pick-media]').forEach((btn) => {
     btn.addEventListener('click', async () => {
+      const targetField = btn.dataset.pickMedia;
+      const libraryConfig = Object.values(mediaLibraryConfigs).find((config) => config.fileFieldId === targetField);
       const selected = await window.huApp.chooseFile({
         filters: [
-          { name: 'Media', extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'pdf'] }
+          {
+            name: 'Media',
+            extensions: libraryConfig?.extensions || ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'pdf']
+          }
         ]
       });
       if (selected) {
-        $(btn.dataset.pickMedia).value = selected;
-        if (btn.dataset.pickMedia === 'pipMaterialFile') {
+        $(targetField).value = selected;
+        if (targetField === 'pipMaterialFile') {
           if ($('usePipMaterialFile')) $('usePipMaterialFile').checked = true;
           renderMediaLibrarySelect('pipMaterial');
         }
-        if (btn.dataset.pickMedia === 'fullScreenPipMaterialFile') {
+        if (targetField === 'fullScreenPipMaterialFile') {
           if ($('useFullScreenPipMaterialFile')) $('useFullScreenPipMaterialFile').checked = true;
           renderMediaLibrarySelect('fullScreenPipMaterial');
         }

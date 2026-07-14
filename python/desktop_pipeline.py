@@ -1071,8 +1071,8 @@ def full_screen_pip_terms(settings):
 def normalized_keyword_text(text):
     cleaner = getattr(batch, "clean_for_len", None)
     if cleaner:
-        return cleaner(str(text or ""))
-    return re.sub(r"[\s，,。！？!?；;：:“”\"'、]+", "", str(text or ""))
+        return str(cleaner(str(text or ""))).lower()
+    return re.sub(r"[\s，,。！？!?；;：:“”\"'、]+", "", str(text or "")).lower()
 
 
 def intro_end_for_units(timed_units, title_end):
@@ -2484,24 +2484,55 @@ def full_screen_pip_close_at_clause_end(settings):
     return True if value is None else bool_setting(value)
 
 
+def timed_sentence_groups(timed_units):
+    groups = []
+    by_index = {}
+    for order, unit in enumerate(timed_units or []):
+        if unit.get("source") == "title":
+            continue
+        sentence_index = unit.get("sentence_index", f"unit-{order}")
+        if sentence_index not in by_index:
+            group = {
+                "sentence_index": sentence_index,
+                "order": order,
+                "units": [],
+            }
+            by_index[sentence_index] = group
+            groups.append(group)
+        by_index[sentence_index]["units"].append(unit)
+
+    prepared = []
+    for group in groups:
+        units = group["units"]
+        visible_units = [unit for unit in units if unit.get("visible")]
+        if not visible_units:
+            continue
+        group["visible_units"] = visible_units
+        group["text"] = "".join(str(unit.get("text", "")) for unit in visible_units)
+        group["start"] = min(float(unit.get("start", 0.0)) for unit in units)
+        group["end"] = max(float(unit.get("end", unit.get("start", 0.0))) for unit in units)
+        prepared.append(group)
+    return prepared
+
+
 def sentence_end_by_index(timed_units):
-    ends = {}
-    for group in batch.sentence_groups(timed_units):
-        ends[group["sentence_index"]] = float(group.get("end", 0.0))
-    return ends
+    return {
+        group["sentence_index"]: float(group.get("end", 0.0))
+        for group in timed_sentence_groups(timed_units)
+    }
 
 
 def sentence_start_by_index(timed_units):
-    starts = {}
-    for group in batch.sentence_groups(timed_units):
-        starts[group["sentence_index"]] = float(group.get("start", 0.0))
-    return starts
+    return {
+        group["sentence_index"]: float(group.get("start", 0.0))
+        for group in timed_sentence_groups(timed_units)
+    }
 
 
 def sentence_text_by_index(timed_units):
     return {
         group["sentence_index"]: group.get("text", "")
-        for group in batch.sentence_groups(timed_units)
+        for group in timed_sentence_groups(timed_units)
     }
 
 
@@ -2539,28 +2570,31 @@ def timed_sentence_offset_time(timed_units, sentence_index, target_offset, fallb
     return float(fallback_time)
 
 
-def full_screen_pip_clause_window(timed_units, unit, clean_term, source_text, sentence_start, sentence_end):
-    sentence_index = unit.get("sentence_index")
+def keyword_match_in_sentence_units(units, clean_term):
+    clean_parts = [normalized_keyword_text(unit.get("text", "")) for unit in units]
+    sentence_text = "".join(clean_parts)
+    trigger_offset = sentence_text.find(clean_term)
+    if trigger_offset < 0:
+        return None
+    cursor = 0
+    for unit, clean_text in zip(units, clean_parts):
+        next_cursor = cursor + len(clean_text)
+        if clean_text and trigger_offset < next_cursor:
+            local_offset = max(0, trigger_offset - cursor)
+            ratio = local_offset / max(1, len(clean_text))
+            start = float(unit.get("start", 0.0))
+            end = float(unit.get("end", start))
+            return trigger_offset, start + (end - start) * ratio
+        cursor = next_cursor
+    return trigger_offset, float(units[-1].get("end", units[-1].get("start", 0.0)))
+
+
+def full_screen_pip_clause_window(timed_units, sentence_index, trigger_offset, source_text, sentence_start, sentence_end):
     sentences = batch.split_sentences(source_text) if source_text else []
     try:
         raw_sentence = sentences[int(sentence_index)]
     except (IndexError, TypeError, ValueError):
-        return float(unit.get("start", sentence_start)), float(sentence_end), "unit_start", "sentence_end"
-
-    trigger_offset = 0
-    found_trigger_unit = False
-    for candidate in timed_units:
-        if candidate.get("sentence_index") != sentence_index:
-            continue
-        clean_text = normalized_keyword_text(candidate.get("text", ""))
-        if candidate is unit:
-            position = clean_text.find(clean_term)
-            trigger_offset += max(0, position)
-            found_trigger_unit = True
-            break
-        trigger_offset += len(clean_text)
-    if not found_trigger_unit:
-        return float(unit.get("start", sentence_start)), float(sentence_end), "unit_start", "sentence_end"
+        return float(sentence_start), float(sentence_end), "sentence_start", "sentence_end"
 
     clause_start_offset = 0
     clause_end_offset = None
@@ -2767,36 +2801,30 @@ def build_full_screen_pip_effect_events(settings, timed_units, duration, title_e
     if not sources or not term_items:
         return []
 
-    sentence_starts = sentence_start_by_index(timed_units)
-    sentence_ends = sentence_end_by_index(timed_units)
-    sentence_texts = sentence_text_by_index(timed_units)
     blocked_sentence_indices = set(blocked_sentence_indices or [])
-    for unit in timed_units:
-        if unit.get("source") == "title" or not unit.get("visible"):
-            continue
-        sentence_index = unit.get("sentence_index")
+    for group in timed_sentence_groups(timed_units):
+        sentence_index = group.get("sentence_index")
         if sentence_index in blocked_sentence_indices:
             continue
-        sentence_text = sentence_texts.get(sentence_index, unit.get("text", ""))
-        unit_start = float(unit.get("start", 0.0))
-        unit_end = float(unit.get("end", unit_start))
-        if unit_end <= float(title_end or 0.0) + 0.02:
+        sentence_text = group.get("text", "")
+        sentence_start = float(group.get("start", 0.0))
+        sentence_end = float(group.get("end", sentence_start))
+        if sentence_end <= float(title_end or 0.0) + 0.02:
             continue
         for item in term_items:
             if sentence_has_backing_keyword(sentence_text) and is_generic_identity_pip_term(item["term"]):
                 continue
-            keyword_start = keyword_start_in_unit(unit, item["clean"])
-            if keyword_start is None:
+            match = keyword_match_in_sentence_units(group.get("units") or [], item["clean"])
+            if match is None:
                 continue
+            trigger_offset, keyword_start = match
             source = rotating_media_choice(sources)
             if not source:
                 continue
-            sentence_start = sentence_starts.get(sentence_index, unit_start)
-            sentence_end = sentence_ends.get(sentence_index, unit_end)
             clause_start, clause_end, clause_start_mode, clause_end_mode = full_screen_pip_clause_window(
                 timed_units,
-                unit,
-                item["clean"],
+                sentence_index,
+                trigger_offset,
                 source_text,
                 sentence_start,
                 sentence_end,
@@ -2954,19 +2982,43 @@ def video_dimensions(path):
             "ffprobe",
             "-v", "error",
             "-select_streams", "v:0",
-            "-show_entries", "stream=width,height",
+            "-show_entries", "stream=width,height:stream_tags=rotate:stream_side_data=rotation",
             "-of", "json",
             str(path),
         ], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
         streams = json.loads(result.stdout or "{}").get("streams") or []
         if not streams:
             return None
-        width = int(streams[0].get("width") or 0)
-        height = int(streams[0].get("height") or 0)
+        stream = streams[0]
+        width = int(stream.get("width") or 0)
+        height = int(stream.get("height") or 0)
+        rotation = 0
+        for side_data in stream.get("side_data_list") or []:
+            if side_data.get("rotation") is None:
+                continue
+            try:
+                rotation = int(round(float(side_data.get("rotation"))))
+            except (TypeError, ValueError):
+                rotation = 0
+            break
+        if not rotation:
+            try:
+                rotation = int(round(float((stream.get("tags") or {}).get("rotate") or 0)))
+            except (TypeError, ValueError):
+                rotation = 0
+        raw_width, raw_height = width, height
+        if abs(rotation) % 180 == 90:
+            width, height = height, width
         if width > 0 and height > 0:
-            return width, height
+            return {
+                "width": width,
+                "height": height,
+                "raw_width": raw_width,
+                "raw_height": raw_height,
+                "rotation": rotation,
+            }
     except Exception as exc:
-        log_json("opening_video_probe_failed", path=str(path), error=str(exc))
+        log_json("visual_source_probe_failed", path=str(path), error=str(exc))
     return None
 
 
@@ -2974,7 +3026,8 @@ def opening_video_fit_mode(opening_video):
     dimensions = video_dimensions(opening_video)
     if not dimensions:
         return "cover", {"fit_reason": "probe_failed"}
-    width, height = dimensions
+    width = int(dimensions["width"])
+    height = int(dimensions["height"])
     ratio = width / height
     targets = {
         "vertical_9_16": 9 / 16,
@@ -2990,6 +3043,9 @@ def opening_video_fit_mode(opening_video):
     return mode, {
         "width": width,
         "height": height,
+        "raw_width": dimensions.get("raw_width", width),
+        "raw_height": dimensions.get("raw_height", height),
+        "rotation": dimensions.get("rotation", 0),
         "ratio": f"{ratio:.4f}",
         "fit_reason": "closer_to_vertical" if mode == "cover" else "closer_to_horizontal_or_4_3",
     }
@@ -5318,6 +5374,9 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
                 "opening_video_fit_reason": opening_fit_info.get("fit_reason", ""),
                 "opening_video_width": str(opening_fit_info.get("width", "")),
                 "opening_video_height": str(opening_fit_info.get("height", "")),
+                "opening_video_raw_width": str(opening_fit_info.get("raw_width", "")),
+                "opening_video_raw_height": str(opening_fit_info.get("raw_height", "")),
+                "opening_video_rotation": str(opening_fit_info.get("rotation", "")),
                 "opening_video_ratio": str(opening_fit_info.get("ratio", "")),
                 "opening_title_layout": "horizontal_split" if opening_fit_mode == "contain_blur" else "template",
                 "opening_video": str(opening_video),
