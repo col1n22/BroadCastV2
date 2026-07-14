@@ -112,6 +112,7 @@
                   <label><input id="clipIntro" type="checkbox" />身份背书</label>
                   <label><input id="clipPatent" type="checkbox" />专利</label>
                   <label><input id="clipPip" type="checkbox" />画中画</label>
+                  <label><input id="clipFullScreenPip" type="checkbox" />全屏画中画</label>
                   <label><input id="clipTextEffects" type="checkbox" />花字</label>
                   <label><input id="clipLogo" type="checkbox" />Logo</label>
                 </div>
@@ -975,6 +976,68 @@
                 <input id="pipPriority" type="number" min="0" max="10" step="1" />
               </div>
               <p class="hint">宽度按 16:9 自动计算，只需要调整高度和位置。</p>
+            </div>
+
+            <div class="settings-card">
+              <h3>全屏画中画</h3>
+              <div class="media-library-section">
+                <div class="section-row">
+                  <div>
+                    <h4>全屏画中画素材库</h4>
+                    <p class="hint">不勾选使用指定时，每批任务内随机轮换，全部素材用过一遍前不重复。</p>
+                  </div>
+                  <div class="media-library-import-actions">
+                    <button id="btnImportFullScreenPipMaterialLibrary" class="button secondary small" type="button">导入文件</button>
+                    <button id="btnImportFullScreenPipMaterialLibraryFolder" class="button secondary small" type="button">导入文件夹</button>
+                  </div>
+                </div>
+                <div class="font-library-meta">
+                  <span id="fullScreenPipMaterialLibraryCount">0 个全屏画中画素材</span>
+                </div>
+                <div id="fullScreenPipMaterialLibraryList" class="font-library-list"></div>
+                <div class="field">
+                  <label>库内指定素材</label>
+                  <select id="fullScreenPipMaterialLibrarySelect"></select>
+                </div>
+              </div>
+              <div class="field">
+                <label>素材文件夹</label>
+                <div class="path-row">
+                  <input id="fullScreenPipFolder" />
+                  <button class="icon-button" data-pick-dir="fullScreenPipFolder" title="选择目录">...</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>指定全屏画中画素材文件</label>
+                <div class="path-row with-toggle">
+                  <input id="fullScreenPipMaterialFile" />
+                  <button class="icon-button" data-pick-media="fullScreenPipMaterialFile" title="选择素材">...</button>
+                  <label class="inline-check"><input id="useFullScreenPipMaterialFile" type="checkbox" /><span>使用指定</span></label>
+                </div>
+              </div>
+              <div class="field">
+                <label>触发关键词</label>
+                <textarea id="fullScreenPipKeywords" class="keyword-textarea" rows="4" placeholder="每行一个关键词，也可以用逗号、顿号分隔"></textarea>
+              </div>
+              <div class="pip-layout-grid">
+                <div class="field">
+                  <label>固定持续秒数</label>
+                  <input id="fullScreenPipDurationSeconds" type="number" min="0.5" max="30" step="0.1" />
+                </div>
+                <div class="field">
+                  <label>横屏显示比例</label>
+                  <select id="fullScreenPipHorizontalAspectMode">
+                    <option value="4_3">4:3（画面更大）</option>
+                    <option value="16_9">16:9（完整更宽）</option>
+                  </select>
+                </div>
+              </div>
+              <label class="inline-check standalone"><input id="fullScreenPipCloseAtClauseEnd" type="checkbox" /><span>按逗号结束一小段话（默认）</span></label>
+              <div class="field">
+                <label>全屏画中画特效优先级（0-10）</label>
+                <input id="fullScreenPipPriority" type="number" min="0" max="10" step="1" />
+              </div>
+              <p class="hint">关键词只用于定位。默认从关键词所在逗号短句的开头播放，到后面最近的中文或英文逗号；没有逗号时播放到句末。取消勾选后从短句开头按固定持续秒数播放。</p>
             </div>
 
             <div class="settings-card">

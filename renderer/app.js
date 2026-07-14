@@ -63,6 +63,7 @@ const fields = [
   'clipPatent',
   'clipIntro',
   'clipPip',
+  'clipFullScreenPip',
   'bgmStartMode',
   'sfxMode',
   'sfxFolder',
@@ -91,6 +92,15 @@ const fields = [
   'pipHeight',
   'pipDurationSeconds',
   'pipCloseAtSentenceEnd',
+  'fullScreenPipFolder',
+  'fullScreenPipMaterialLibrary',
+  'fullScreenPipMaterialFile',
+  'useFullScreenPipMaterialFile',
+  'fullScreenPipKeywords',
+  'fullScreenPipDurationSeconds',
+  'fullScreenPipCloseAtClauseEnd',
+  'fullScreenPipHorizontalAspectMode',
+  'fullScreenPipPriority',
   'patentFile',
   'patentPriority',
   'inheritanceFile',
@@ -186,7 +196,7 @@ let templateManagerFilterAccountIndexes = new Set();
 let previewLayoutFrame = 0;
 
 const requiredClipFields = new Set(['clipTitle', 'clipCaption', 'clipBgm']);
-const optionalClipFields = ['hideCtaCaptions', 'clipTitleMotion', 'clipIntro', 'clipPatent', 'clipPip', 'clipTextEffects', 'clipLogo'];
+const optionalClipFields = ['hideCtaCaptions', 'clipTitleMotion', 'clipIntro', 'clipPatent', 'clipPip', 'clipFullScreenPip', 'clipTextEffects', 'clipLogo'];
 const textEffectIds = ['kinetic', 'slide-reveal', 'word-bounce', 'spring-up', 'bubble'];
 const defaultSensitiveReplacementRules = '医=醫\n药=藥\n病=疒\n血=皿\n手术=手S';
 const clipFieldLabels = {
@@ -198,6 +208,7 @@ const clipFieldLabels = {
   clipIntro: '身份背书',
   clipPatent: '专利',
   clipPip: '画中画',
+  clipFullScreenPip: '全屏画中画',
   clipTextEffects: '花字',
   clipLogo: 'Logo'
 };
@@ -1186,6 +1197,19 @@ const mediaLibraryConfigs = {
     emptyText: '还没有导入画中画素材',
     filterName: 'Media',
     extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'png', 'jpg', 'jpeg', 'webp']
+  },
+  fullScreenPipMaterial: {
+    settingKey: 'fullScreenPipMaterialLibrary',
+    listId: 'fullScreenPipMaterialLibraryList',
+    countId: 'fullScreenPipMaterialLibraryCount',
+    importButtonId: 'btnImportFullScreenPipMaterialLibrary',
+    importFolderButtonId: 'btnImportFullScreenPipMaterialLibraryFolder',
+    selectId: 'fullScreenPipMaterialLibrarySelect',
+    fileFieldId: 'fullScreenPipMaterialFile',
+    label: '全屏画中画素材',
+    emptyText: '还没有导入全屏画中画素材',
+    filterName: 'Media',
+    extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'png', 'jpg', 'jpeg', 'webp']
   }
 };
 
@@ -1677,6 +1701,7 @@ function collectSettings() {
   next.sfxLibrary = collectMediaLibraryFromUi('sfx');
   next.openingVideoLibrary = collectMediaLibraryFromUi('openingVideo');
   next.pipMaterialLibrary = collectMediaLibraryFromUi('pipMaterial');
+  next.fullScreenPipMaterialLibrary = collectMediaLibraryFromUi('fullScreenPipMaterial');
   next.previewVisibleObjects = [...previewVisibleKinds];
   next.accountTemplates = next.chanjingAccountIndex && next.currentTemplateId
     ? stashCurrentTemplate(next.chanjingAccountIndex, next.currentTemplateId, next)
@@ -1699,6 +1724,7 @@ function fillSettings(value) {
   settings.sfxLibrary = normalizeMediaLibraryForKind('sfx', settings.sfxLibrary);
   settings.openingVideoLibrary = normalizeMediaLibraryForKind('openingVideo', settings.openingVideoLibrary);
   settings.pipMaterialLibrary = normalizeMediaLibraryForKind('pipMaterial', settings.pipMaterialLibrary);
+  settings.fullScreenPipMaterialLibrary = normalizeMediaLibraryForKind('fullScreenPipMaterial', settings.fullScreenPipMaterialLibrary);
   settings.sensitiveReplacementRules = normalizeSensitiveReplacementRules(settings.sensitiveReplacementRules);
   Object.assign(settings, normalizeSilenceTrimSettings(settings));
   Object.assign(settings, normalizeVideoSpeedSettings(settings));
@@ -5185,6 +5211,21 @@ function validateBeforeRun() {
       throw new Error('请先填写：画中画触发关键词');
     }
   }
+  if (current.clipFullScreenPip) {
+    if (current.useFullScreenPipMaterialFile && !current.fullScreenPipMaterialFile) {
+      throw new Error('请先选择：指定全屏画中画素材文件');
+    }
+    if (
+      !current.useFullScreenPipMaterialFile
+      && !current.fullScreenPipFolder
+      && !normalizeMediaLibrary(current.fullScreenPipMaterialLibrary, mediaLibraryConfigs.fullScreenPipMaterial.extensions).length
+    ) {
+      throw new Error('请先填写：全屏画中画素材文件夹');
+    }
+    if (!String(current.fullScreenPipKeywords || '').trim()) {
+      throw new Error('请先填写：全屏画中画触发关键词');
+    }
+  }
   if (current.clipTextEffects && !current.textEffectIds.length) {
     throw new Error('请至少勾选一种花字效果');
   }
@@ -5806,6 +5847,10 @@ async function init() {
         if (btn.dataset.pickMedia === 'pipMaterialFile') {
           if ($('usePipMaterialFile')) $('usePipMaterialFile').checked = true;
           renderMediaLibrarySelect('pipMaterial');
+        }
+        if (btn.dataset.pickMedia === 'fullScreenPipMaterialFile') {
+          if ($('useFullScreenPipMaterialFile')) $('useFullScreenPipMaterialFile').checked = true;
+          renderMediaLibrarySelect('fullScreenPipMaterial');
         }
       }
     });

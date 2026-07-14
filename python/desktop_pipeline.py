@@ -1064,6 +1064,10 @@ def pip_terms(settings):
     return split_keyword_terms(settings.get("pipKeywords"))
 
 
+def full_screen_pip_terms(settings):
+    return split_keyword_terms(settings.get("fullScreenPipKeywords"))
+
+
 def normalized_keyword_text(text):
     cleaner = getattr(batch, "clean_for_len", None)
     if cleaner:
@@ -1243,6 +1247,21 @@ def choose_pip_sources(settings):
         raise SystemExit(f"画中画文件夹不存在：{folder}")
     if not candidates:
         raise SystemExit(f"画中画素材库和文件夹里没有可用素材：{folder or ''}")
+    return candidates
+
+
+def choose_full_screen_pip_sources(settings):
+    if bool_setting(settings.get("useFullScreenPipMaterialFile")):
+        path = Path(require(settings.get("fullScreenPipMaterialFile"), "指定全屏画中画素材文件"))
+        return [validate_media_file(path, "指定全屏画中画素材文件", PIP_MEDIA_EXTS)]
+
+    candidates, library, folder = library_and_folder_media(
+        settings, "fullScreenPipMaterialLibrary", "fullScreenPipFolder", PIP_MEDIA_EXTS
+    )
+    if folder and not folder.exists() and not library:
+        raise SystemExit(f"全屏画中画文件夹不存在：{folder}")
+    if not candidates:
+        raise SystemExit(f"全屏画中画素材库和文件夹里没有可用素材：{folder or ''}")
     return candidates
 
 
@@ -2303,34 +2322,66 @@ def run_ffmpeg_checked(cmd, context):
     raise RuntimeError(f"{context}失败，FFmpeg退出码 {proc.returncode}：\n{details}")
 
 
-def render_packaged_without_builtin_logo(raw_video, ass_path, packaged_path, pip_events=None):
+def render_packaged_without_builtin_logo(raw_video, ass_path, packaged_path, pip_events=None, full_screen_pip_events=None):
     pip_events = pip_events or []
+    full_screen_pip_events = full_screen_pip_events or []
     cmd = [
         "ffmpeg", "-y",
         "-i", str(raw_video),
     ]
 
     valid_pips = [event for event in pip_events if event and event.get("source")]
-    for event in valid_pips:
-        pip_source = Path(event["source"])
-        suffix = pip_source.suffix.lower()
+    valid_full_screen_pips = [event for event in full_screen_pip_events if event and event.get("source")]
+    visual_inputs = [
+        *(("pip", event) for event in valid_pips),
+        *(("fullscreen_pip", event) for event in valid_full_screen_pips),
+    ]
+    for kind, event in visual_inputs:
+        source = Path(event["source"])
+        suffix = source.suffix.lower()
         if suffix in getattr(batch, "PIP_IMAGE_EXTS", IMAGE_EXTS):
-            cmd.extend(["-loop", "1", "-i", str(pip_source)])
+            cmd.extend(["-loop", "1", "-i", str(source)])
+        elif kind == "fullscreen_pip":
+            cmd.extend(["-stream_loop", "-1", "-an", "-i", str(source)])
         else:
-            cmd.extend(["-an", "-i", str(pip_source)])
+            cmd.extend(["-an", "-i", str(source)])
 
     filter_parts = []
     base_label = "0:v"
-    for input_index, event in enumerate(valid_pips, start=1):
+    for input_index, (kind, event) in enumerate(visual_inputs, start=1):
         event_i = input_index - 1
         start = float(event["start"])
         end = float(event["end"])
+        out_label = f"vbase{event_i + 1}"
+        if kind == "fullscreen_pip":
+            event_duration = max(0.05, end - start)
+            fit_mode = str(event.get("fit_mode") or "cover")
+            horizontal_mode = str(event.get("horizontal_aspect_mode") or "4_3")
+            raw_label = f"fullscreenraw{event_i}"
+            visual_label = f"fullscreen{event_i}"
+            filter_parts.append(
+                opening_video_filter(
+                    f"{input_index}:v",
+                    raw_label,
+                    event_duration,
+                    fit_mode,
+                    horizontal_mode,
+                )
+            )
+            filter_parts.append(
+                f"[{raw_label}]setpts=PTS+{start:.3f}/TB[{visual_label}]"
+            )
+            filter_parts.append(
+                f"[{base_label}][{visual_label}]overlay=0:0:eof_action=pass:enable='between(t,{start:.3f},{end:.3f})'[{out_label}]"
+            )
+            base_label = out_label
+            continue
+
         width = int(event.get("width", getattr(batch, "PIP_WIDTH", 768)))
         height = int(event.get("height", getattr(batch, "PIP_HEIGHT", 432)))
         x = int(event.get("x", getattr(batch, "PIP_X", 156)))
         y = int(event.get("y", getattr(batch, "PIP_Y", 910)))
         pip_label = f"pip{event_i}"
-        out_label = f"vbase{event_i + 1}"
         filter_parts.append(
             f"[{input_index}:v]setpts=PTS-STARTPTS+{start:.3f}/TB,"
             f"scale={width}:{height}:force_original_aspect_ratio=increase,"
@@ -2359,7 +2410,7 @@ def render_packaged_without_builtin_logo(raw_video, ass_path, packaged_path, pip
         "-movflags", "+faststart",
         str(packaged_path),
     ])
-    run_ffmpeg_checked(cmd, "字幕/画中画合成")
+    run_ffmpeg_checked(cmd, "字幕/画中画/全屏画中画合成")
 
 
 def overlay_logo_full_video(input_path, logo_file, settings, output_path):
@@ -2424,11 +2475,27 @@ def pip_close_at_sentence_end(settings):
     return bool_setting(settings.get("pipCloseAtSentenceEnd"))
 
 
+def full_screen_pip_duration_seconds(settings):
+    return bounded_number(settings.get("fullScreenPipDurationSeconds"), 4.0, 0.5, 30.0)
+
+
+def full_screen_pip_close_at_clause_end(settings):
+    value = settings.get("fullScreenPipCloseAtClauseEnd")
+    return True if value is None else bool_setting(value)
+
+
 def sentence_end_by_index(timed_units):
     ends = {}
     for group in batch.sentence_groups(timed_units):
         ends[group["sentence_index"]] = float(group.get("end", 0.0))
     return ends
+
+
+def sentence_start_by_index(timed_units):
+    starts = {}
+    for group in batch.sentence_groups(timed_units):
+        starts[group["sentence_index"]] = float(group.get("start", 0.0))
+    return starts
 
 
 def sentence_text_by_index(timed_units):
@@ -2444,6 +2511,87 @@ def pip_event_end(settings, start, sentence_end, video_duration):
     if pip_close_at_sentence_end(settings):
         return min(float(video_duration), sentence_end)
     return min(float(video_duration), start + pip_duration_seconds(settings))
+
+
+def full_screen_pip_event_end(settings, start, clause_end, video_duration):
+    start = float(start)
+    clause_end = float(clause_end or start)
+    if full_screen_pip_close_at_clause_end(settings):
+        return min(float(video_duration), clause_end)
+    return min(float(video_duration), start + full_screen_pip_duration_seconds(settings))
+
+
+def timed_sentence_offset_time(timed_units, sentence_index, target_offset, fallback_time):
+    cursor = 0
+    for unit in timed_units:
+        if unit.get("sentence_index") != sentence_index:
+            continue
+        clean_text = normalized_keyword_text(unit.get("text", ""))
+        length = len(clean_text)
+        if not length:
+            continue
+        if target_offset <= cursor + length:
+            ratio = max(0.0, min(1.0, (target_offset - cursor) / length))
+            start = float(unit.get("start", 0.0))
+            end = float(unit.get("end", start))
+            return start + (end - start) * ratio
+        cursor += length
+    return float(fallback_time)
+
+
+def full_screen_pip_clause_window(timed_units, unit, clean_term, source_text, sentence_start, sentence_end):
+    sentence_index = unit.get("sentence_index")
+    sentences = batch.split_sentences(source_text) if source_text else []
+    try:
+        raw_sentence = sentences[int(sentence_index)]
+    except (IndexError, TypeError, ValueError):
+        return float(unit.get("start", sentence_start)), float(sentence_end), "unit_start", "sentence_end"
+
+    trigger_offset = 0
+    found_trigger_unit = False
+    for candidate in timed_units:
+        if candidate.get("sentence_index") != sentence_index:
+            continue
+        clean_text = normalized_keyword_text(candidate.get("text", ""))
+        if candidate is unit:
+            position = clean_text.find(clean_term)
+            trigger_offset += max(0, position)
+            found_trigger_unit = True
+            break
+        trigger_offset += len(clean_text)
+    if not found_trigger_unit:
+        return float(unit.get("start", sentence_start)), float(sentence_end), "unit_start", "sentence_end"
+
+    clause_start_offset = 0
+    clause_end_offset = None
+    for match in re.finditer(r"[，,]", raw_sentence):
+        boundary_offset = len(normalized_keyword_text(raw_sentence[:match.start()]))
+        if boundary_offset <= trigger_offset:
+            clause_start_offset = boundary_offset
+            continue
+        clause_end_offset = boundary_offset
+        break
+
+    clause_start = timed_sentence_offset_time(
+        timed_units,
+        sentence_index,
+        clause_start_offset,
+        sentence_start,
+    )
+    if clause_end_offset is None:
+        return float(clause_start), float(sentence_end), "sentence_start" if clause_start_offset == 0 else "comma", "sentence_end"
+    clause_end = timed_sentence_offset_time(
+        timed_units,
+        sentence_index,
+        clause_end_offset,
+        sentence_end,
+    )
+    return (
+        float(clause_start),
+        min(float(sentence_end), float(clause_end)),
+        "sentence_start" if clause_start_offset == 0 else "comma",
+        "comma",
+    )
 
 
 def keyword_start_in_unit(unit, clean_term):
@@ -2609,6 +2757,73 @@ def build_pip_effect_events(settings, timed_units, duration, title_end, blocked_
         if event:
             events.append(event)
     return events
+
+
+def build_full_screen_pip_effect_events(settings, timed_units, duration, title_end, blocked_sentence_indices=None, source_text=""):
+    if not effect_enabled(settings, "clipFullScreenPip"):
+        return []
+    sources = choose_full_screen_pip_sources(settings)
+    term_items = normalized_pip_term_items(full_screen_pip_terms(settings))
+    if not sources or not term_items:
+        return []
+
+    sentence_starts = sentence_start_by_index(timed_units)
+    sentence_ends = sentence_end_by_index(timed_units)
+    sentence_texts = sentence_text_by_index(timed_units)
+    blocked_sentence_indices = set(blocked_sentence_indices or [])
+    for unit in timed_units:
+        if unit.get("source") == "title" or not unit.get("visible"):
+            continue
+        sentence_index = unit.get("sentence_index")
+        if sentence_index in blocked_sentence_indices:
+            continue
+        sentence_text = sentence_texts.get(sentence_index, unit.get("text", ""))
+        unit_start = float(unit.get("start", 0.0))
+        unit_end = float(unit.get("end", unit_start))
+        if unit_end <= float(title_end or 0.0) + 0.02:
+            continue
+        for item in term_items:
+            if sentence_has_backing_keyword(sentence_text) and is_generic_identity_pip_term(item["term"]):
+                continue
+            keyword_start = keyword_start_in_unit(unit, item["clean"])
+            if keyword_start is None:
+                continue
+            source = rotating_media_choice(sources)
+            if not source:
+                continue
+            sentence_start = sentence_starts.get(sentence_index, unit_start)
+            sentence_end = sentence_ends.get(sentence_index, unit_end)
+            clause_start, clause_end, clause_start_mode, clause_end_mode = full_screen_pip_clause_window(
+                timed_units,
+                unit,
+                item["clean"],
+                source_text,
+                sentence_start,
+                sentence_end,
+            )
+            start = max(float(title_end or 0.0) + 0.05, clause_start)
+            end = full_screen_pip_event_end(settings, start, clause_end, duration)
+            visual = {
+                "source": str(source),
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "muted": True,
+                "keyword": item["term"],
+                "keyword_time": round(float(keyword_start), 3),
+                "start_mode": clause_start_mode,
+                "end_mode": clause_end_mode if full_screen_pip_close_at_clause_end(settings) else "fixed_seconds",
+                "horizontal_aspect_mode": full_screen_pip_horizontal_aspect_mode(settings),
+            }
+            event = effect_event(
+                "fullscreen_pip",
+                start,
+                end,
+                priority=setting_priority(settings, "fullScreenPipPriority"),
+                fullscreen_pip=visual,
+                source=str(source),
+            )
+            return [event] if event else []
+    return []
 
 
 def build_backing_image_effect_events(settings, timed_units, duration, title_end):
@@ -2780,10 +2995,18 @@ def opening_video_fit_mode(opening_video):
     }
 
 
-def opening_horizontal_aspect_mode(settings):
-    mode = str((settings or {}).get("openingHorizontalAspectMode") or "4_3").strip().lower()
+def horizontal_aspect_mode(settings, key):
+    mode = str((settings or {}).get(key) or "4_3").strip().lower()
     normalized = mode.replace(":", "_").replace("-", "_")
     return normalized if normalized in {"16_9", "4_3"} else "4_3"
+
+
+def opening_horizontal_aspect_mode(settings):
+    return horizontal_aspect_mode(settings, "openingHorizontalAspectMode")
+
+
+def full_screen_pip_horizontal_aspect_mode(settings):
+    return horizontal_aspect_mode(settings, "fullScreenPipHorizontalAspectMode")
 
 
 def opening_video_foreground_filter(source_label, output_label, aspect_mode):
@@ -2897,6 +3120,8 @@ def apply_settings(settings, bundle):
     if effect_enabled(settings, "clipPip"):
         if not pip_rule_items(settings):
             choose_pip_sources(settings)
+    if effect_enabled(settings, "clipFullScreenPip"):
+        choose_full_screen_pip_sources(settings)
 
     batch.BASE_URL = settings.get("chanjingBaseUrl") or batch.BASE_URL
     os.environ["CHANJING_APP_ID"] = require(settings.get("chanjingAppId"), "蝉镜 AK / App ID")
@@ -4919,6 +5144,7 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             "clip_intro": effect_enabled(settings, "clipIntro"),
             "clip_patent": effect_enabled(settings, "clipPatent"),
             "clip_pip": effect_enabled(settings, "clipPip"),
+            "clip_fullscreen_pip": effect_enabled(settings, "clipFullScreenPip"),
             "clip_text_effects": effect_enabled(settings, "clipTextEffects"),
             "clip_logo": clip_enabled(settings, "clipLogo", False),
             "template_key": str(settings.get("activeTemplateKey", "")),
@@ -4933,12 +5159,16 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             "disable_silence_trim": bool_setting(settings.get("disableSilenceTrim")),
             "pip_duration_seconds": f"{pip_duration_seconds(settings):.3f}",
             "pip_close_at_sentence_end": pip_close_at_sentence_end(settings),
+            "fullscreen_pip_duration_seconds": f"{full_screen_pip_duration_seconds(settings):.3f}",
+            "fullscreen_pip_close_at_clause_end": full_screen_pip_close_at_clause_end(settings),
+            "fullscreen_pip_horizontal_aspect_mode": full_screen_pip_horizontal_aspect_mode(settings),
             "effect_priority_policy": "user_configured_0_to_10_lower_number_wins",
             "effect_conflict_policy": "skip_whole_lower_priority_event",
             "priority_title_motion": setting_priority(settings, "titleMotionPriority"),
             "priority_inheritance": setting_priority(settings, "inheritancePriority"),
             "priority_patent": setting_priority(settings, "patentPriority"),
             "priority_pip": setting_priority(settings, "pipPriority"),
+            "priority_fullscreen_pip": setting_priority(settings, "fullScreenPipPriority"),
             "priority_text_effect": setting_priority(settings, "textEffectPriority"),
             "backing_exclusive_sentence_indices": ",".join(str(value) for value in sorted(backing_exclusive_sentence_indices)),
             "backing_exclusive_sentence_policy": "only_backing_effects_when_xinhuo_or_patent_sentence_ends_with_period",
@@ -4951,6 +5181,14 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
                 effect_candidates.append(title_event)
         effect_candidates.extend(build_backing_image_effect_events(settings, timed_units, duration, title_end))
         effect_candidates.extend(build_pip_effect_events(settings, timed_units, duration, title_end, backing_exclusive_sentence_indices))
+        effect_candidates.extend(build_full_screen_pip_effect_events(
+            settings,
+            timed_units,
+            duration,
+            title_end,
+            backing_exclusive_sentence_indices,
+            source_text=item.get("text", ""),
+        ))
         effect_candidates.extend(build_text_effect_events(settings, render_pages, caption_events, text_effect_specs, backing_exclusive_sentence_indices))
         selected_effects, skipped_effects = select_effect_events(effect_candidates)
         selected_effects, skipped_effects = enforce_single_pip_event(selected_effects, skipped_effects)
@@ -4960,6 +5198,15 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             for event in selected_effects
             if event.get("pip")
         ]
+        selected_full_screen_pip_events = []
+        for event in selected_effects:
+            if not event.get("fullscreen_pip"):
+                continue
+            visual = dict(event["fullscreen_pip"])
+            fit_mode, fit_info = opening_video_fit_mode(Path(visual["source"]))
+            visual["fit_mode"] = fit_mode
+            visual["fit_info"] = fit_info
+            selected_full_screen_pip_events.append(visual)
         selected_image_events = [
             event["image_event"]
             for event in selected_effects
@@ -5008,6 +5255,11 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             "text_effect_sfx_mode": text_effect_sfx_mode,
             "text_effect_sfx": str(text_effect_sfx_file or ""),
             "text_effect_sfx_starts_original": ",".join(f"{start:.3f}" for start in text_effect_sfx_starts),
+            "fullscreen_pip_selected_count": len(selected_full_screen_pip_events),
+            "fullscreen_pip_sources": "|".join(event.get("source", "") for event in selected_full_screen_pip_events),
+            "fullscreen_pip_fit_modes": ",".join(event.get("fit_mode", "") for event in selected_full_screen_pip_events),
+            "fullscreen_pip_start_modes": ",".join(event.get("start_mode", "") for event in selected_full_screen_pip_events),
+            "fullscreen_pip_end_modes": ",".join(event.get("end_mode", "") for event in selected_full_screen_pip_events),
             "keyword_sfx_enabled": clip_enabled(settings, "keywordSfxEnabled", True),
             "keyword_sfx_terms": ",".join(keyword_sfx_terms(settings)),
             "keyword_sfx_after_original": f"{keyword_sfx_after:.3f}",
@@ -5083,7 +5335,25 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
                 opening_video=str(opening_video),
                 replace_seconds=round(replaced_seconds, 3),
             )
-        render_packaged_without_builtin_logo(source_for_packaging, ass_path, packaged, pip_events=selected_pip_events)
+        render_packaged_without_builtin_logo(
+            source_for_packaging,
+            ass_path,
+            packaged,
+            pip_events=selected_pip_events,
+            full_screen_pip_events=selected_full_screen_pip_events,
+        )
+        for visual in selected_full_screen_pip_events:
+            log_json(
+                "fullscreen_pip_applied",
+                index=index,
+                slug=slug,
+                source=visual.get("source", ""),
+                start=visual.get("start", 0.0),
+                end=visual.get("end", 0.0),
+                fit_mode=visual.get("fit_mode", ""),
+                horizontal_aspect_mode=visual.get("horizontal_aspect_mode", ""),
+                fit_info=visual.get("fit_info", {}),
+            )
         packaged_for_tighten = packaged
         if selected_image_events:
             write_remotion_image_plan(
