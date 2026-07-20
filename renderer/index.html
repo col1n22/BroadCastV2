@@ -112,6 +112,8 @@
                   <label><input id="clipIntro" type="checkbox" />身份背书</label>
                   <label><input id="clipPatent" type="checkbox" />专利</label>
                   <label><input id="clipPip" type="checkbox" />画中画</label>
+                  <label><input id="clipClickAvatar" type="checkbox" />点击头像</label>
+                  <label><input id="clipClickCard" type="checkbox" />卡片</label>
                   <label><input id="clipFullScreenPip" type="checkbox" />全屏画中画</label>
                   <label><input id="clipTextEffects" type="checkbox" />花字</label>
                   <label><input id="clipLogo" type="checkbox" />Logo</label>
@@ -225,6 +227,14 @@
                   <span>画中画</span>
                   <span class="preview-resize-handle preview-pip-resize-handle"></span>
                 </div>
+                <div id="previewClickAvatarBox" class="preview-box preview-pip-box preview-click-avatar-box" data-preview-box="clickAvatar">
+                  <span>点击头像</span>
+                  <span class="preview-resize-handle preview-pip-resize-handle"></span>
+                </div>
+                <div id="previewClickCardBox" class="preview-box preview-pip-box preview-click-card-box" data-preview-box="clickCard">
+                  <span>卡片</span>
+                  <span class="preview-resize-handle preview-pip-resize-handle"></span>
+                </div>
                 <div id="previewLogoBox" class="preview-box preview-logo-box" data-preview-box="logo">
                   <img id="previewLogoImage" alt="" hidden />
                   <span id="previewLogoPlaceholder">Logo</span>
@@ -246,6 +256,8 @@
                   <option value="caption">字幕</option>
                   <option value="textEffect">花字限制</option>
                   <option value="pip">画中画</option>
+                  <option value="clickAvatar">点击头像</option>
+                  <option value="clickCard">卡片</option>
                   <option value="logo">Logo</option>
                   <option value="disclaimer">底部声明</option>
                 </select>
@@ -262,6 +274,8 @@
                     <label><input type="checkbox" data-preview-visibility="caption" checked />字幕</label>
                     <label><input type="checkbox" data-preview-visibility="textEffect" checked />花字限制</label>
                     <label><input type="checkbox" data-preview-visibility="pip" checked />画中画</label>
+                    <label><input type="checkbox" data-preview-visibility="clickAvatar" checked />点击头像</label>
+                    <label><input type="checkbox" data-preview-visibility="clickCard" checked />卡片</label>
                     <label><input type="checkbox" data-preview-visibility="logo" checked />Logo</label>
                     <label><input type="checkbox" data-preview-visibility="disclaimer" checked />底部声明</label>
                   </div>
@@ -304,6 +318,12 @@
                     <select data-preview-font-select="titleBottomFontPath"></select>
                   </div>
                 </div>
+                <div class="font-random-grid">
+                  <label class="inline-check"><input id="randomTitleTopFont" data-preview-style-target="randomTitleTopFont" type="checkbox" /><span>上行字体随机</span></label>
+                  <label class="inline-check"><input id="randomTitleMiddleFont" data-preview-style-target="randomTitleMiddleFont" type="checkbox" /><span>中行字体随机</span></label>
+                  <label class="inline-check"><input id="randomTitleBottomFont" data-preview-style-target="randomTitleBottomFont" type="checkbox" /><span>下行字体随机</span></label>
+                </div>
+                <p class="hint">开启后每条任务从字体库分别随机一次，位置、字号和颜色不变。</p>
                 <div class="field">
                   <label>标题字号</label>
                   <input id="titleFontSizePreview" data-preview-style-target="titleFontSize" type="number" min="48" max="220" step="1" />
@@ -397,6 +417,8 @@
                   <label>字幕字体文件</label>
                   <select data-preview-font-select="captionFontPath"></select>
                 </div>
+                <label class="inline-check standalone"><input id="randomCaptionFont" data-preview-style-target="randomCaptionFont" type="checkbox" /><span>字幕字体随机</span></label>
+                <p class="hint">每条任务从字体库随机一次，整条视频字幕使用同一字体。</p>
                 <div class="field">
                   <label>字幕字号</label>
                   <input id="captionFontSizePreview" data-preview-style-target="captionFontSize" type="number" min="36" max="160" step="1" />
@@ -462,6 +484,16 @@
                 <p class="hint">画中画没有字体样式；宽度按 16:9 自动计算，只调整高度和水平偏差。</p>
               </div>
 
+              <div class="preview-object-style" data-preview-style-panel="clickAvatar">
+                <h4>点击头像</h4>
+                <p class="hint">与画中画分开保存位置和大小，宽度按 16:9 自动计算。</p>
+              </div>
+
+              <div class="preview-object-style" data-preview-style-panel="clickCard">
+                <h4>卡片</h4>
+                <p class="hint">与画中画分开保存位置和大小，宽度按 16:9 自动计算。</p>
+              </div>
+
               <div class="preview-object-style" data-preview-style-panel="logo">
                 <h4>Logo</h4>
                 <div class="field">
@@ -482,6 +514,11 @@
                 <div class="field">
                   <label>不透明度（%）</label>
                   <input data-preview-style-target="logoOpacityPercent" type="number" min="0" max="100" />
+                </div>
+                <label class="inline-check standalone"><input id="logoDurationEnabled" data-preview-style-target="logoDurationEnabled" type="checkbox" /><span>限制 Logo 展示时长</span></label>
+                <div class="field">
+                  <label>展示时长（秒）</label>
+                  <input id="logoDurationSeconds" data-preview-style-target="logoDurationSeconds" type="number" min="0.5" max="3600" step="0.1" />
                 </div>
               </div>
             </div>
@@ -508,6 +545,14 @@
           <input id="previewPipY" type="hidden" />
           <input id="previewPipW" type="hidden" />
           <input id="previewPipH" type="hidden" />
+          <input id="previewClickAvatarX" type="hidden" />
+          <input id="previewClickAvatarY" type="hidden" />
+          <input id="previewClickAvatarW" type="hidden" />
+          <input id="previewClickAvatarH" type="hidden" />
+          <input id="previewClickCardX" type="hidden" />
+          <input id="previewClickCardY" type="hidden" />
+          <input id="previewClickCardW" type="hidden" />
+          <input id="previewClickCardH" type="hidden" />
           <input id="previewLogoX" type="hidden" />
           <input id="previewLogoY" type="hidden" />
           <input id="previewLogoW" type="hidden" />
@@ -976,6 +1021,133 @@
                 <input id="pipPriority" type="number" min="0" max="10" step="1" />
               </div>
               <p class="hint">宽度按 16:9 自动计算，只需要调整高度和位置。</p>
+            </div>
+
+            <div class="settings-card">
+              <h3>点击头像</h3>
+              <div class="media-library-section">
+                <div class="section-row">
+                  <div>
+                    <h4>点击头像素材库</h4>
+                    <p class="hint">素材库、触发词和布局与普通画中画完全分开。</p>
+                  </div>
+                  <div class="media-library-import-actions">
+                    <button id="btnImportClickAvatarMaterialLibrary" class="button secondary small" type="button">导入文件</button>
+                    <button id="btnImportClickAvatarMaterialLibraryFolder" class="button secondary small" type="button">导入文件夹</button>
+                  </div>
+                </div>
+                <div class="font-library-meta"><span id="clickAvatarMaterialLibraryCount">0 个点击头像素材</span></div>
+                <div id="clickAvatarMaterialLibraryList" class="font-library-list"></div>
+                <div class="field">
+                  <label>库内指定素材</label>
+                  <select id="clickAvatarMaterialLibrarySelect"></select>
+                </div>
+              </div>
+              <div class="field">
+                <label>素材文件夹</label>
+                <div class="path-row">
+                  <input id="clickAvatarFolder" />
+                  <button class="icon-button" data-pick-dir="clickAvatarFolder" title="选择目录">...</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>指定点击头像素材</label>
+                <div class="path-row with-toggle">
+                  <input id="clickAvatarMaterialFile" />
+                  <button class="icon-button" data-pick-media="clickAvatarMaterialFile" title="选择素材">...</button>
+                  <label class="inline-check"><input id="useClickAvatarMaterialFile" type="checkbox" /><span>使用指定</span></label>
+                </div>
+              </div>
+              <div class="field">
+                <label>触发关键词</label>
+                <textarea id="clickAvatarKeywords" class="keyword-textarea" rows="4" placeholder="每行一个关键词，也可以用逗号、顿号分隔"></textarea>
+              </div>
+              <div class="field">
+                <div class="section-row">
+                  <label>自定义点击头像列表</label>
+                  <button id="btnAddClickAvatarRule" class="button secondary small" type="button">添加一行</button>
+                </div>
+                <div id="clickAvatarRuleList" class="pip-rule-list"></div>
+              </div>
+              <div class="pip-layout-grid">
+                <div class="field"><label>X</label><input id="clickAvatarX" type="number" min="0" max="1080" /></div>
+                <div class="field"><label>Y</label><input id="clickAvatarY" type="number" min="0" max="1920" /></div>
+                <div class="field"><label>高</label><input id="clickAvatarHeight" type="number" min="80" max="1920" /></div>
+                <div class="field"><label>持续秒数</label><input id="clickAvatarDurationSeconds" type="number" min="0.5" max="30" step="0.1" /></div>
+              </div>
+              <label class="inline-check standalone"><input id="clickAvatarCloseAtSentenceEnd" type="checkbox" /><span>句子结束自动关闭</span></label>
+              <div class="field"><label>点击头像特效优先级（0-10）</label><input id="clickAvatarPriority" type="number" min="0" max="10" step="1" /></div>
+              <p class="hint">宽度按 16:9 自动计算；可在 CTA 阶段正常触发。</p>
+            </div>
+
+            <div class="settings-card">
+              <h3>卡片</h3>
+              <div class="media-library-section">
+                <div class="section-row">
+                  <div>
+                    <h4>卡片素材库</h4>
+                    <p class="hint">素材库、触发词和布局与普通画中画完全分开。</p>
+                  </div>
+                  <div class="media-library-import-actions">
+                    <button id="btnImportClickCardMaterialLibrary" class="button secondary small" type="button">导入文件</button>
+                    <button id="btnImportClickCardMaterialLibraryFolder" class="button secondary small" type="button">导入文件夹</button>
+                  </div>
+                </div>
+                <div class="font-library-meta"><span id="clickCardMaterialLibraryCount">0 个卡片素材</span></div>
+                <div id="clickCardMaterialLibraryList" class="font-library-list"></div>
+                <div class="field">
+                  <label>库内指定素材</label>
+                  <select id="clickCardMaterialLibrarySelect"></select>
+                </div>
+              </div>
+              <div class="field">
+                <label>素材文件夹</label>
+                <div class="path-row">
+                  <input id="clickCardFolder" />
+                  <button class="icon-button" data-pick-dir="clickCardFolder" title="选择目录">...</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>指定卡片素材</label>
+                <div class="path-row with-toggle">
+                  <input id="clickCardMaterialFile" />
+                  <button class="icon-button" data-pick-media="clickCardMaterialFile" title="选择素材">...</button>
+                  <label class="inline-check"><input id="useClickCardMaterialFile" type="checkbox" /><span>使用指定</span></label>
+                </div>
+              </div>
+              <div class="field">
+                <label>触发关键词</label>
+                <textarea id="clickCardKeywords" class="keyword-textarea" rows="4" placeholder="每行一个关键词，也可以用逗号、顿号分隔"></textarea>
+              </div>
+              <div class="field">
+                <div class="section-row">
+                  <label>自定义卡片列表</label>
+                  <button id="btnAddClickCardRule" class="button secondary small" type="button">添加一行</button>
+                </div>
+                <div id="clickCardRuleList" class="pip-rule-list"></div>
+              </div>
+              <div class="pip-layout-grid">
+                <div class="field"><label>X</label><input id="clickCardX" type="number" min="0" max="1080" /></div>
+                <div class="field"><label>Y</label><input id="clickCardY" type="number" min="0" max="1920" /></div>
+                <div class="field"><label>高</label><input id="clickCardHeight" type="number" min="80" max="1920" /></div>
+                <div class="field"><label>持续秒数</label><input id="clickCardDurationSeconds" type="number" min="0.5" max="30" step="0.1" /></div>
+              </div>
+              <label class="inline-check standalone"><input id="clickCardCloseAtSentenceEnd" type="checkbox" /><span>句子结束自动关闭</span></label>
+              <div class="field"><label>卡片特效优先级（0-10）</label><input id="clickCardPriority" type="number" min="0" max="10" step="1" /></div>
+              <p class="hint">宽度按 16:9 自动计算；可在 CTA 阶段正常触发。</p>
+            </div>
+
+            <div class="settings-card ai-material-placeholder-card">
+              <div class="section-row">
+                <h3>AI素材</h3>
+                <span class="beta-badge">Beta</span>
+              </div>
+              <p class="hint">Beta功能，耗时超长，谨慎使用</p>
+              <label class="setting-switch disabled" aria-disabled="true">
+                <input id="aiMaterialEnabled" type="checkbox" disabled />
+                <span class="setting-switch-track" aria-hidden="true"></span>
+                <span>开启 AI 素材</span>
+              </label>
             </div>
 
             <div class="settings-card">

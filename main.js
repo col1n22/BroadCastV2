@@ -110,6 +110,7 @@ function defaultSettings() {
     modelBaseUrl: 'https://api.supremelife.xyz/v1',
     modelApiKey: '',
     modelName: '',
+    aiMaterialEnabled: false,
     sensitiveReplacementRules: '医=醫\n药=藥\n病=疒\n血=皿\n手术=手S',
     fontLibrary: [
       { name: '尔雅新大黑', path: defaultTitleFontPath },
@@ -119,6 +120,9 @@ function defaultSettings() {
     titleTopFontPath: defaultTitleFontPath,
     titleMiddleFontPath: defaultTitleFontPath,
     titleBottomFontPath: defaultTitleFontPath,
+    randomTitleTopFont: false,
+    randomTitleMiddleFont: false,
+    randomTitleBottomFont: false,
     titleFontSize: 144,
     titleTopLetterSpacing: 0,
     titleMiddleLetterSpacing: 0,
@@ -138,6 +142,7 @@ function defaultSettings() {
     titleBgPaddingY: 18,
     titleBgRadius: 12,
     captionFontPath: defaultCaptionFontPath,
+    randomCaptionFont: false,
     captionFontSize: 96,
     textEffectFontPath: defaultCaptionFontPath,
     textEffectColor: '#ffffff',
@@ -162,6 +167,8 @@ function defaultSettings() {
     clipPatent: false,
     clipIntro: false,
     clipPip: false,
+    clipClickAvatar: false,
+    clipClickCard: false,
     clipFullScreenPip: false,
     bgmStartMode: 'after_title',
     sfxMode: 'random',
@@ -190,6 +197,30 @@ function defaultSettings() {
     pipHeight: 432,
     pipDurationSeconds: 4,
     pipCloseAtSentenceEnd: false,
+    clickAvatarFolder: '',
+    clickAvatarMaterialLibrary: [],
+    clickAvatarMaterialFile: '',
+    useClickAvatarMaterialFile: false,
+    clickAvatarKeywords: '点击头像\n点击右侧头像\n点右侧头像\n右侧头像',
+    clickAvatarRules: [],
+    clickAvatarPriority: 5,
+    clickAvatarX: 156,
+    clickAvatarY: 910,
+    clickAvatarHeight: 432,
+    clickAvatarDurationSeconds: 4,
+    clickAvatarCloseAtSentenceEnd: false,
+    clickCardFolder: '',
+    clickCardMaterialLibrary: [],
+    clickCardMaterialFile: '',
+    useClickCardMaterialFile: false,
+    clickCardKeywords: '点击卡片\n点击下方卡片\n点下方卡片\n下方卡片',
+    clickCardRules: [],
+    clickCardPriority: 5,
+    clickCardX: 156,
+    clickCardY: 910,
+    clickCardHeight: 432,
+    clickCardDurationSeconds: 4,
+    clickCardCloseAtSentenceEnd: false,
     fullScreenPipFolder: path.join(bundlePath, 'assets', 'fullscreen_pip'),
     fullScreenPipMaterialLibrary: [],
     fullScreenPipMaterialFile: '',
@@ -249,11 +280,21 @@ function defaultSettings() {
     logoFile: defaultLogoFile(bundlePath),
     useLogoFile: true,
     logoOpacityPercent: 100,
+    logoDurationEnabled: false,
+    logoDurationSeconds: 5,
     previewLogoX: 90,
     previewLogoY: 88,
     previewLogoW: 180,
     previewLogoH: 180,
-    previewVisibleObjects: ['title', 'caption', 'textEffect', 'pip', 'logo', 'disclaimer'],
+    previewClickAvatarX: 156,
+    previewClickAvatarY: 910,
+    previewClickAvatarW: 768,
+    previewClickAvatarH: 432,
+    previewClickCardX: 156,
+    previewClickCardY: 910,
+    previewClickCardW: 768,
+    previewClickCardH: 432,
+    previewVisibleObjects: ['title', 'caption', 'textEffect', 'pip', 'clickAvatar', 'clickCard', 'logo', 'disclaimer'],
     maxItems: 0,
     pollIntervalSeconds: 20,
     timeoutMinutes: 45
@@ -357,9 +398,49 @@ function normalizeModelBaseUrl(value) {
   );
 }
 
+function repairMacMetadataFontPaths(value, defaults = defaultSettings()) {
+  if (Array.isArray(value)) {
+    return value.map((item) => repairMacMetadataFontPaths(item, defaults));
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  const repaired = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (/fontpath$/i.test(key) && typeof entry === 'string' && path.basename(entry).startsWith('._')) {
+      const realName = path.basename(entry).slice(2);
+      const sibling = path.join(path.dirname(entry), realName);
+      const remapped = remapPackagedPath(sibling, bundledBundlePath());
+      const isTitleFont = /^title/i.test(key);
+      const fallback = isTitleFont ? defaults.titleTopFontPath : defaults.captionFontPath;
+      repaired[key] = fs.existsSync(sibling)
+        ? sibling
+        : (fs.existsSync(remapped) ? remapped : fallback);
+      continue;
+    }
+    repaired[key] = repairMacMetadataFontPaths(entry, defaults);
+  }
+  return repaired;
+}
+
 function normalizeLoadedSettings(saved) {
   const merged = { ...defaultSettings(), ...(saved || {}) };
-  const remapped = remapSettingsPaths(merged, bundledBundlePath());
+  const remapped = repairMacMetadataFontPaths(
+    remapSettingsPaths(merged, bundledBundlePath()),
+    defaultSettings()
+  );
+  remapped.aiMaterialEnabled = false;
+  for (const [key, folderName] of [['clickAvatarFolder', 'click_avatar'], ['clickCardFolder', 'click_card']]) {
+    const value = String(remapped[key] || '');
+    const normalized = value.replace(/\//g, '\\').toLowerCase();
+    if (normalized.endsWith(`\\assets\\${folderName}`) && !fs.existsSync(value)) {
+      remapped[key] = '';
+    }
+  }
+  if (saved?.clipClickAvatar === undefined && saved?.clipClickCard === undefined) {
+    const visible = Array.isArray(remapped.previewVisibleObjects) ? remapped.previewVisibleObjects : [];
+    remapped.previewVisibleObjects = [...new Set([...visible, 'clickAvatar', 'clickCard'])];
+  }
   remapped.modelBaseUrl = normalizeModelBaseUrl(remapped.modelBaseUrl);
   if (saved?.useSfxFile === undefined && saved?.sfxMode === 'fixed') {
     remapped.useSfxFile = true;
@@ -445,11 +526,30 @@ async function importSettings() {
   if (result.canceled || !result.filePaths?.[0]) return null;
   const filePath = result.filePaths[0];
   const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  const imported = payload && typeof payload === 'object' && payload.settings && typeof payload.settings === 'object'
-    ? payload.settings
-    : payload;
+  const wrapped = payload && typeof payload === 'object' && !Array.isArray(payload) && Object.prototype.hasOwnProperty.call(payload, 'settings');
+  if (wrapped && payload.meta?.kind && payload.meta.kind !== 'hu-teacher-desktop-settings') {
+    throw new Error('不是医生视频剪辑软件的配置文件');
+  }
+  const imported = wrapped ? payload.settings : payload;
   if (!imported || typeof imported !== 'object' || Array.isArray(imported)) {
     throw new Error('配置文件格式不正确');
+  }
+  const recognizedKeys = [
+    'bundlePath',
+    'outputDir',
+    'chanjingAccounts',
+    'accountTemplates',
+    'accountAssetTemplates',
+    'modelBaseUrl',
+    'fontLibrary',
+    'titleFontPath',
+    'captionFontPath',
+    'clipPreset',
+    'bgmLibrary'
+  ];
+  const recognizedCount = recognizedKeys.filter((key) => Object.prototype.hasOwnProperty.call(imported, key)).length;
+  if (recognizedCount < 3) {
+    throw new Error('配置文件缺少必要的软件设置，请确认没有选错 JSON 文件');
   }
   const next = saveSettings(imported);
   return { filePath, settings: next };
@@ -1108,17 +1208,22 @@ ipcMain.handle('run:start', async (_event, payload) => {
 
   child.stdout.on('data', (data) => send('run:log', { stream: 'stdout', text: data.toString('utf8') }));
   child.stderr.on('data', (data) => send('run:log', { stream: 'stderr', text: data.toString('utf8') }));
+  let completionSent = false;
+  const finishRun = (result) => {
+    if (completionSent) return;
+    completionSent = true;
+    if (activeRun === child) {
+      activeRun = null;
+      activeTitleOverridesPath = null;
+      activeContentOverridesPath = null;
+    }
+    send('run:done', result);
+  };
   child.on('error', (error) => {
-    activeRun = null;
-    activeTitleOverridesPath = null;
-    activeContentOverridesPath = null;
-    send('run:done', { code: -1, error: error.message });
+    finishRun({ code: -1, error: error.message });
   });
   child.on('close', (code) => {
-    activeRun = null;
-    activeTitleOverridesPath = null;
-    activeContentOverridesPath = null;
-    send('run:done', { code });
+    finishRun({ code });
   });
   return { started: true, pid: child.pid, jobPath };
 });

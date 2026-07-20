@@ -63,6 +63,7 @@ VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
 PIP_MEDIA_EXTS = VIDEO_EXTS | IMAGE_EXTS
+FONT_EXTS = {".ttf", ".otf", ".ttc"}
 DEFAULT_EFFECT_PRIORITY = 5
 TEXT_EFFECT_IDS = ("kinetic", "slide-reveal", "word-bounce", "spring-up", "bubble")
 MAX_TEXT_EFFECT_EVENTS = 3
@@ -428,6 +429,52 @@ def configured_font_path(settings, key, fallback_key=None, label="字体文件")
             break
         value = settings.get(fallback)
     return Path(require(value, label))
+
+
+def font_library_paths(settings):
+    raw = settings.get("fontLibrary")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            raw = [raw]
+    if not isinstance(raw, list):
+        return []
+    paths = []
+    seen = set()
+    for item in raw:
+        value = item.get("path") if isinstance(item, dict) else item
+        path = Path(str(value or "").strip())
+        if not str(path) or path.name.startswith("._"):
+            continue
+        key = str(path).lower()
+        if key in seen or not path.exists() or path.suffix.lower() not in FONT_EXTS:
+            continue
+        seen.add(key)
+        paths.append(path)
+    return paths
+
+
+def apply_random_template_fonts(settings):
+    random_fields = (
+        ("randomTitleTopFont", "titleTopFontPath", "标题上行"),
+        ("randomTitleMiddleFont", "titleMiddleFontPath", "标题中行"),
+        ("randomTitleBottomFont", "titleBottomFontPath", "标题下行"),
+        ("randomCaptionFont", "captionFontPath", "字幕"),
+    )
+    enabled = [item for item in random_fields if bool_setting(settings.get(item[0]))]
+    if not enabled:
+        return {}
+    candidates = font_library_paths(settings)
+    if not candidates:
+        raise SystemExit("已开启字体随机，但字体库中没有可用字体")
+    selected = {}
+    for _toggle_key, path_key, label in enabled:
+        path = random.choice(candidates)
+        settings[path_key] = str(path)
+        selected[path_key] = str(path)
+        log_json("template_font_randomized", role=label, path=str(path))
+    return selected
 
 
 def copy_extra_font_assets(font_paths):
@@ -1064,6 +1111,14 @@ def pip_terms(settings):
     return split_keyword_terms(settings.get("pipKeywords"))
 
 
+def click_avatar_terms(settings):
+    return split_keyword_terms(settings.get("clickAvatarKeywords"))
+
+
+def click_card_terms(settings):
+    return split_keyword_terms(settings.get("clickCardKeywords"))
+
+
 def full_screen_pip_terms(settings):
     return split_keyword_terms(settings.get("fullScreenPipKeywords"))
 
@@ -1235,19 +1290,53 @@ def choose_opening_video(settings):
     return random.choice(candidates), mode
 
 
-def choose_pip_sources(settings):
-    if bool_setting(settings.get("usePipMaterialFile")):
-        path = Path(require(settings.get("pipMaterialFile"), "指定画中画素材文件"))
-        return [validate_media_file(path, "指定画中画素材文件", PIP_MEDIA_EXTS)]
+def choose_configured_pip_sources(settings, prefix, label):
+    prefix_title = prefix[0].upper() + prefix[1:]
+    use_file_key = f"use{prefix_title}MaterialFile"
+    file_key = f"{prefix}MaterialFile"
+    library_key = f"{prefix}MaterialLibrary"
+    folder_key = f"{prefix}Folder"
+    if bool_setting(settings.get(use_file_key)):
+        path = Path(require(settings.get(file_key), f"指定{label}素材文件"))
+        return [validate_media_file(path, f"指定{label}素材文件", PIP_MEDIA_EXTS)]
 
     candidates, library, folder = library_and_folder_media(
-        settings, "pipMaterialLibrary", "pipFolder", PIP_MEDIA_EXTS
+        settings, library_key, folder_key, PIP_MEDIA_EXTS
     )
     if folder and not folder.exists() and not library:
-        raise SystemExit(f"画中画文件夹不存在：{folder}")
+        raise SystemExit(f"{label}素材文件夹不存在：{folder}")
     if not candidates:
-        raise SystemExit(f"画中画素材库和文件夹里没有可用素材：{folder or ''}")
+        raise SystemExit(f"{label}素材库和文件夹里没有可用素材：{folder or ''}")
     return candidates
+
+
+def available_configured_pip_sources(settings, prefix):
+    prefix_title = prefix[0].upper() + prefix[1:]
+    if bool_setting(settings.get(f"use{prefix_title}MaterialFile")):
+        value = str(settings.get(f"{prefix}MaterialFile") or "").strip()
+        if not value:
+            return []
+        path = Path(value)
+        return [path] if path.exists() and path.suffix.lower() in PIP_MEDIA_EXTS else []
+    candidates, _library, _folder = library_and_folder_media(
+        settings,
+        f"{prefix}MaterialLibrary",
+        f"{prefix}Folder",
+        PIP_MEDIA_EXTS,
+    )
+    return candidates
+
+
+def choose_pip_sources(settings):
+    return choose_configured_pip_sources(settings, "pip", "画中画")
+
+
+def choose_click_avatar_sources(settings):
+    return choose_configured_pip_sources(settings, "clickAvatar", "点击头像")
+
+
+def choose_click_card_sources(settings):
+    return choose_configured_pip_sources(settings, "clickCard", "卡片")
 
 
 def choose_full_screen_pip_sources(settings):
@@ -1265,15 +1354,15 @@ def choose_full_screen_pip_sources(settings):
     return candidates
 
 
-def pip_rule_items(settings):
-    raw = settings.get("pipRules")
+def pip_rule_items(settings, prefix="pip", label="画中画"):
+    raw = settings.get(f"{prefix}Rules")
     if isinstance(raw, str):
         if not raw.strip():
             return []
         try:
             raw = json.loads(raw)
         except Exception as exc:
-            raise SystemExit(f"自定义画中画列表格式错误：{exc}") from exc
+            raise SystemExit(f"自定义{label}列表格式错误：{exc}") from exc
     if not isinstance(raw, list):
         return []
 
@@ -1288,22 +1377,22 @@ def pip_rule_items(settings):
         if not keywords and not video_value and not folder_value:
             continue
         if not keywords:
-            raise SystemExit(f"自定义画中画第 {index} 行需要填写关键词")
+            raise SystemExit(f"自定义{label}第 {index} 行需要填写关键词")
         if use_video_file:
-            source = Path(require(video_value, f"自定义画中画第 {index} 行指定素材文件"))
+            source = Path(require(video_value, f"自定义{label}第 {index} 行指定素材文件"))
             if not source.exists():
-                raise SystemExit(f"自定义画中画第 {index} 行素材不存在：{source}")
+                raise SystemExit(f"自定义{label}第 {index} 行素材不存在：{source}")
             if source.suffix.lower() not in PIP_MEDIA_EXTS:
-                raise SystemExit(f"自定义画中画第 {index} 行不是支持的素材格式：{source}")
+                raise SystemExit(f"自定义{label}第 {index} 行不是支持的素材格式：{source}")
             sources = [source]
             mode = "fixed"
         else:
-            folder = Path(require(folder_value, f"自定义画中画第 {index} 行随机素材文件夹"))
+            folder = Path(require(folder_value, f"自定义{label}第 {index} 行随机素材文件夹"))
             if not folder.exists():
-                raise SystemExit(f"自定义画中画第 {index} 行素材文件夹不存在：{folder}")
+                raise SystemExit(f"自定义{label}第 {index} 行素材文件夹不存在：{folder}")
             sources = media_files(folder, PIP_MEDIA_EXTS)
             if not sources:
-                raise SystemExit(f"自定义画中画第 {index} 行素材文件夹里没有可用素材：{folder}")
+                raise SystemExit(f"自定义{label}第 {index} 行素材文件夹里没有可用素材：{folder}")
             mode = "random"
         rules.append({
             "index": index,
@@ -1478,19 +1567,22 @@ def select_effect_events(candidates):
 
 def enforce_single_pip_event(selected, skipped):
     kept = []
-    pip_keeper = None
+    pip_keepers = {}
     for event in sorted(
         selected,
         key=lambda item: (int(item.get("priority", DEFAULT_EFFECT_PRIORITY)), float(item.get("start", 0.0)), float(item.get("end", 0.0))),
     ):
         if event.get("pip"):
+            effect_type = str(event.get("effect_type") or "pip")
+            group = effect_type if effect_type in {"click_avatar", "click_card"} else "pip"
+            pip_keeper = pip_keepers.get(group)
             if pip_keeper is not None:
                 skipped_event = dict(event)
                 skipped_event["skipped_by"] = pip_keeper.get("effect_type", "pip")
-                skipped_event["skip_reason"] = "single_pip_per_video"
+                skipped_event["skip_reason"] = f"single_{group}_per_video"
                 skipped.append(skipped_event)
                 continue
-            pip_keeper = event
+            pip_keepers[group] = event
         kept.append(event)
     return sorted(kept, key=lambda event: float(event.get("start", 0.0))), skipped
 
@@ -2413,6 +2505,12 @@ def render_packaged_without_builtin_logo(raw_video, ass_path, packaged_path, pip
     run_ffmpeg_checked(cmd, "字幕/画中画/全屏画中画合成")
 
 
+def logo_duration_seconds(settings):
+    if not bool_setting(settings.get("logoDurationEnabled")):
+        return None
+    return bounded_number(settings.get("logoDurationSeconds"), 5.0, 0.5, 3600.0)
+
+
 def overlay_logo_full_video(input_path, logo_file, settings, output_path):
     logo_path = Path(logo_file)
     if not logo_path.exists():
@@ -2423,10 +2521,12 @@ def overlay_logo_full_video(input_path, logo_file, settings, output_path):
     y = box["y"]
     w = box["w"]
     h = box["h"]
+    duration = logo_duration_seconds(settings)
+    enable = f":enable='between(t,0,{duration:.3f})'" if duration is not None else ""
     filter_complex = (
         f"[1:v]scale={w}:{h}:force_original_aspect_ratio=decrease,"
         f"format=rgba,colorchannelmixer=aa={opacity:.3f}[logo];"
-        f"[0:v][logo]overlay=x='{x}+({w}-overlay_w)/2':y='{y}+({h}-overlay_h)/2':format=auto:eof_action=pass,"
+        f"[0:v][logo]overlay=x='{x}+({w}-overlay_w)/2':y='{y}+({h}-overlay_h)/2':format=auto:eof_action=pass{enable},"
         "format=yuv420p[v]"
     )
     subprocess.run([
@@ -2456,23 +2556,35 @@ def build_fallback_pip_event(timed_units, duration, title_end, source):
     return None
 
 
-def pip_layout(settings):
-    height = int(round(bounded_number(settings.get("pipHeight"), 432, 80, 1920)))
+def configured_pip_layout(settings, prefix="pip"):
+    height = int(round(bounded_number(settings.get(f"{prefix}Height"), 432, 80, 1920)))
     width = int(round(height * 16 / 9))
     if width > 1080:
         width = 1080
         height = int(round(width * 9 / 16))
-    x = int(round(bounded_number(settings.get("pipX"), 156, 0, 1080 - width)))
-    y = int(round(bounded_number(settings.get("pipY"), 910, 0, 1920 - height)))
+    x = int(round(bounded_number(settings.get(f"{prefix}X"), 156, 0, 1080 - width)))
+    y = int(round(bounded_number(settings.get(f"{prefix}Y"), 910, 0, 1920 - height)))
     return {"x": x, "y": y, "width": width, "height": height}
 
 
+def pip_layout(settings):
+    return configured_pip_layout(settings, "pip")
+
+
+def configured_pip_duration_seconds(settings, prefix="pip"):
+    return bounded_number(settings.get(f"{prefix}DurationSeconds"), 4.0, 0.5, 30.0)
+
+
 def pip_duration_seconds(settings):
-    return bounded_number(settings.get("pipDurationSeconds"), 4.0, 0.5, 30.0)
+    return configured_pip_duration_seconds(settings, "pip")
+
+
+def configured_pip_close_at_sentence_end(settings, prefix="pip"):
+    return bool_setting(settings.get(f"{prefix}CloseAtSentenceEnd"))
 
 
 def pip_close_at_sentence_end(settings):
-    return bool_setting(settings.get("pipCloseAtSentenceEnd"))
+    return configured_pip_close_at_sentence_end(settings, "pip")
 
 
 def full_screen_pip_duration_seconds(settings):
@@ -2536,12 +2648,16 @@ def sentence_text_by_index(timed_units):
     }
 
 
-def pip_event_end(settings, start, sentence_end, video_duration):
+def configured_pip_event_end(settings, start, sentence_end, video_duration, prefix="pip"):
     start = float(start)
     sentence_end = float(sentence_end or start)
-    if pip_close_at_sentence_end(settings):
+    if configured_pip_close_at_sentence_end(settings, prefix):
         return min(float(video_duration), sentence_end)
-    return min(float(video_duration), start + pip_duration_seconds(settings))
+    return min(float(video_duration), start + configured_pip_duration_seconds(settings, prefix))
+
+
+def pip_event_end(settings, start, sentence_end, video_duration):
+    return configured_pip_event_end(settings, start, sentence_end, video_duration, "pip")
 
 
 def full_screen_pip_event_end(settings, start, clause_end, video_duration):
@@ -2648,36 +2764,51 @@ def normalized_pip_term_items(terms):
     return [{"term": term, "clean": clean} for term, clean in terms]
 
 
-def build_pip_event_from_terms(settings, timed_units, duration, title_end, term_items, source_picker, kind, blocked_sentence_indices=None):
+def build_pip_event_from_terms(
+    settings,
+    timed_units,
+    duration,
+    title_end,
+    term_items,
+    source_picker,
+    kind,
+    blocked_sentence_indices=None,
+    config_prefix="pip",
+):
     if not term_items:
         return []
-    layout = pip_layout(settings)
+    layout = configured_pip_layout(settings, config_prefix)
     sentence_ends = sentence_end_by_index(timed_units)
-    sentence_texts = sentence_text_by_index(timed_units)
     blocked_sentence_indices = set(blocked_sentence_indices or [])
-    for unit in timed_units:
-        if unit.get("source") == "title" or not unit.get("visible"):
-            continue
-        sentence_index = unit.get("sentence_index")
+    for group in timed_sentence_groups(timed_units):
+        sentence_index = group.get("sentence_index")
         if sentence_index in blocked_sentence_indices:
             continue
-        sentence_text = sentence_texts.get(sentence_index, unit.get("text", ""))
-        unit_start = float(unit.get("start", 0.0))
-        unit_end = float(unit.get("end", unit_start))
+        sentence_text = group.get("text", "")
+        unit_end = float(group.get("end", group.get("start", 0.0)))
         if unit_end <= float(title_end or 0.0) + 0.02:
             continue
         for item in term_items:
             if sentence_has_backing_keyword(sentence_text) and is_generic_identity_pip_term(item["term"]):
                 continue
-            start = keyword_start_in_unit(unit, item["clean"])
-            if start is None:
+            match = keyword_match_in_sentence_units(group.get("units") or [], item["clean"])
+            if match is None:
                 continue
-            source = source_picker(item, unit)
+            _trigger_offset, start = match
+            matched_unit = next(
+                (
+                    unit
+                    for unit in group.get("units") or []
+                    if float(unit.get("start", 0.0)) <= float(start) <= float(unit.get("end", unit.get("start", 0.0)))
+                ),
+                (group.get("units") or [{}])[0],
+            )
+            source = source_picker(item, matched_unit)
             if not source:
                 continue
             start = max(float(title_end or 0.0) + 0.05, start)
             sentence_end = sentence_ends.get(sentence_index, unit_end)
-            end = pip_event_end(settings, start, sentence_end, duration)
+            end = configured_pip_event_end(settings, start, sentence_end, duration, config_prefix)
             pip = batch.make_pip_event(source, start, end, duration, kind, sentence_index, title_end)
             if not pip:
                 return []
@@ -2685,17 +2816,30 @@ def build_pip_event_from_terms(settings, timed_units, duration, title_end, term_
             pip["source"] = str(source)
             pip["muted"] = True
             pip["keyword"] = item["term"]
-            pip["priority"] = effect_priority_value(item.get("priority"), setting_priority(settings, "pipPriority"))
+            pip["priority"] = effect_priority_value(
+                item.get("priority"),
+                setting_priority(settings, f"{config_prefix}Priority"),
+            )
             if item.get("rule_index"):
                 pip["pipRuleIndex"] = item["rule_index"]
             return [pip]
     return []
 
 
-def build_keyword_pip_events(settings, timed_units, duration, title_end, sources, blocked_sentence_indices=None):
+def build_keyword_pip_events(
+    settings,
+    timed_units,
+    duration,
+    title_end,
+    sources,
+    blocked_sentence_indices=None,
+    terms=None,
+    config_prefix="pip",
+    kind="keyword_pip",
+):
     if not sources:
         return []
-    term_items = normalized_pip_term_items(pip_terms(settings))
+    term_items = normalized_pip_term_items(pip_terms(settings) if terms is None else terms)
     return build_pip_event_from_terms(
         settings,
         timed_units,
@@ -2703,14 +2847,25 @@ def build_keyword_pip_events(settings, timed_units, duration, title_end, sources
         title_end,
         term_items,
         lambda _item, _unit: rotating_media_choice(sources),
-        "keyword_pip",
+        kind,
         blocked_sentence_indices=blocked_sentence_indices,
+        config_prefix=config_prefix,
     )
 
 
-def build_rule_pip_events(settings, timed_units, duration, title_end, rules=None, blocked_sentence_indices=None):
+def build_rule_pip_events(
+    settings,
+    timed_units,
+    duration,
+    title_end,
+    rules=None,
+    blocked_sentence_indices=None,
+    config_prefix="pip",
+    label="画中画",
+    kind="keyword_pip_rule",
+):
     term_items = []
-    for rule in (rules if rules is not None else pip_rule_items(settings)):
+    for rule in (rules if rules is not None else pip_rule_items(settings, config_prefix, label)):
         for item in normalized_pip_term_items(rule["keywords"]):
             item["sources"] = rule["sources"]
             item["source_mode"] = rule.get("source_mode", "fixed")
@@ -2724,8 +2879,9 @@ def build_rule_pip_events(settings, timed_units, duration, title_end, rules=None
         title_end,
         term_items,
         lambda item, _unit: rotating_media_choice(item.get("sources") or []),
-        "keyword_pip_rule",
+        kind,
         blocked_sentence_indices=blocked_sentence_indices,
+        config_prefix=config_prefix,
     )
 
 
@@ -2767,15 +2923,58 @@ def build_self_intro_pip_effect_events(settings, timed_units, duration, title_en
     return []
 
 
-def build_pip_effect_events(settings, timed_units, duration, title_end, blocked_sentence_indices=None):
-    if not effect_enabled(settings, "clipPip"):
+def build_configured_pip_effect_events(
+    settings,
+    timed_units,
+    duration,
+    title_end,
+    blocked_sentence_indices,
+    config_prefix,
+    clip_field,
+    event_type,
+    label,
+    terms,
+    optional_when_empty=False,
+):
+    if not effect_enabled(settings, clip_field):
         return []
-    rules = pip_rule_items(settings)
+    rules = pip_rule_items(settings, config_prefix, label)
     if rules:
-        raw_pips = build_rule_pip_events(settings, timed_units, duration, title_end, rules, blocked_sentence_indices=blocked_sentence_indices)
+        raw_pips = build_rule_pip_events(
+            settings,
+            timed_units,
+            duration,
+            title_end,
+            rules,
+            blocked_sentence_indices=blocked_sentence_indices,
+            config_prefix=config_prefix,
+            label=label,
+            kind=f"keyword_{event_type}_rule",
+        )
     else:
-        sources = choose_pip_sources(settings)
-        raw_pips = build_keyword_pip_events(settings, timed_units, duration, title_end, sources, blocked_sentence_indices=blocked_sentence_indices)
+        sources = (
+            available_configured_pip_sources(settings, config_prefix)
+            if optional_when_empty
+            else choose_configured_pip_sources(settings, config_prefix, label)
+        )
+        if not sources:
+            log_json(
+                "optional_visual_skipped",
+                visual_kind=event_type,
+                reason="no_usable_material",
+            )
+            return []
+        raw_pips = build_keyword_pip_events(
+            settings,
+            timed_units,
+            duration,
+            title_end,
+            sources,
+            blocked_sentence_indices=blocked_sentence_indices,
+            terms=terms,
+            config_prefix=config_prefix,
+            kind=f"keyword_{event_type}",
+        )
 
     events = []
     for raw_event in raw_pips:
@@ -2784,13 +2983,62 @@ def build_pip_effect_events(settings, timed_units, duration, title_end, blocked_
         pip = dict(raw_event)
         pip["source"] = str(pip.get("source") or "")
         pip["muted"] = True
+        pip["visual_kind"] = event_type
         for key in ("keyword", "pipRuleIndex", "priority", "x", "y", "width", "height"):
             if key in raw_event:
                 pip[key] = raw_event[key]
-        event = effect_event("pip", pip["start"], pip["end"], priority=pip.get("priority"), pip=pip, source=pip["source"])
+        event = effect_event(event_type, pip["start"], pip["end"], priority=pip.get("priority"), pip=pip, source=pip["source"])
         if event:
             events.append(event)
     return events
+
+
+def build_pip_effect_events(settings, timed_units, duration, title_end, blocked_sentence_indices=None):
+    return build_configured_pip_effect_events(
+        settings,
+        timed_units,
+        duration,
+        title_end,
+        blocked_sentence_indices,
+        "pip",
+        "clipPip",
+        "pip",
+        "画中画",
+        pip_terms(settings),
+        optional_when_empty=True,
+    )
+
+
+def build_click_avatar_effect_events(settings, timed_units, duration, title_end, blocked_sentence_indices=None):
+    return build_configured_pip_effect_events(
+        settings,
+        timed_units,
+        duration,
+        title_end,
+        blocked_sentence_indices,
+        "clickAvatar",
+        "clipClickAvatar",
+        "click_avatar",
+        "点击头像",
+        click_avatar_terms(settings),
+        optional_when_empty=True,
+    )
+
+
+def build_click_card_effect_events(settings, timed_units, duration, title_end, blocked_sentence_indices=None):
+    return build_configured_pip_effect_events(
+        settings,
+        timed_units,
+        duration,
+        title_end,
+        blocked_sentence_indices,
+        "clickCard",
+        "clipClickCard",
+        "click_card",
+        "卡片",
+        click_card_terms(settings),
+        optional_when_empty=True,
+    )
 
 
 def build_full_screen_pip_effect_events(settings, timed_units, duration, title_end, blocked_sentence_indices=None, source_text=""):
@@ -3150,6 +3398,7 @@ def replace_opening_visual(input_path, opening_video, output_path, replace_secon
 
 
 def apply_settings(settings, bundle):
+    randomized_fonts = apply_random_template_fonts(settings)
     title_top_font = configured_font_path(settings, "titleTopFontPath", "titleFontPath", "标题上行字体文件")
     title_middle_font = configured_font_path(settings, "titleMiddleFontPath", ("titleTopFontPath", "titleFontPath"), "标题中行字体文件")
     title_bottom_font = configured_font_path(settings, "titleBottomFontPath", ("titleTopFontPath", "titleFontPath"), "标题下行字体文件")
@@ -3184,8 +3433,11 @@ def apply_settings(settings, bundle):
             settings["logoFolder"] = str(bundle / "assets" / "template_assets")
         choose_logo_file(settings)
     if effect_enabled(settings, "clipPip"):
-        if not pip_rule_items(settings):
-            choose_pip_sources(settings)
+        pip_rule_items(settings)
+    if effect_enabled(settings, "clipClickAvatar"):
+        pip_rule_items(settings, "clickAvatar", "点击头像")
+    if effect_enabled(settings, "clipClickCard"):
+        pip_rule_items(settings, "clickCard", "卡片")
     if effect_enabled(settings, "clipFullScreenPip"):
         choose_full_screen_pip_sources(settings)
 
@@ -3222,6 +3474,7 @@ def apply_settings(settings, bundle):
         "disclaimer_font": disclaimer_font,
         "bgm_file": bgm_file,
         "bgm_mode": bgm_mode,
+        "randomized_fonts": randomized_fonts,
         "output_dir": output_dir,
         "bundle": bundle,
         "display_replacement_count": len(display_replacement_pairs),
@@ -5175,7 +5428,7 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
         remotion_image_layer = output_dir / f"{prefix}_image_effects.mov"
         packaged = output_dir / f"{prefix}_packaged.mp4"
         packaged_with_images = output_dir / f"{prefix}_packaged_image_effects.mp4"
-        packaged_with_logo = output_dir / f"{prefix}_packaged_logo.mp4"
+        final_without_logo = output_dir / f"{prefix}_final_without_logo.mp4"
         final = output_dir / f"{prefix}_final.mp4"
         report = output_dir / f"{prefix}_report.txt"
         opening_replaced = output_dir / f"{prefix}_opening_replaced_tmp.mp4"
@@ -5210,6 +5463,8 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             "clip_intro": effect_enabled(settings, "clipIntro"),
             "clip_patent": effect_enabled(settings, "clipPatent"),
             "clip_pip": effect_enabled(settings, "clipPip"),
+            "clip_click_avatar": effect_enabled(settings, "clipClickAvatar"),
+            "clip_click_card": effect_enabled(settings, "clipClickCard"),
             "clip_fullscreen_pip": effect_enabled(settings, "clipFullScreenPip"),
             "clip_text_effects": effect_enabled(settings, "clipTextEffects"),
             "clip_logo": clip_enabled(settings, "clipLogo", False),
@@ -5225,6 +5480,10 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             "disable_silence_trim": bool_setting(settings.get("disableSilenceTrim")),
             "pip_duration_seconds": f"{pip_duration_seconds(settings):.3f}",
             "pip_close_at_sentence_end": pip_close_at_sentence_end(settings),
+            "click_avatar_duration_seconds": f"{configured_pip_duration_seconds(settings, 'clickAvatar'):.3f}",
+            "click_avatar_close_at_sentence_end": configured_pip_close_at_sentence_end(settings, "clickAvatar"),
+            "click_card_duration_seconds": f"{configured_pip_duration_seconds(settings, 'clickCard'):.3f}",
+            "click_card_close_at_sentence_end": configured_pip_close_at_sentence_end(settings, "clickCard"),
             "fullscreen_pip_duration_seconds": f"{full_screen_pip_duration_seconds(settings):.3f}",
             "fullscreen_pip_close_at_clause_end": full_screen_pip_close_at_clause_end(settings),
             "fullscreen_pip_horizontal_aspect_mode": full_screen_pip_horizontal_aspect_mode(settings),
@@ -5235,10 +5494,13 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             "priority_inheritance": setting_priority(settings, "inheritancePriority"),
             "priority_patent": setting_priority(settings, "patentPriority"),
             "priority_pip": setting_priority(settings, "pipPriority"),
+            "priority_click_avatar": setting_priority(settings, "clickAvatarPriority"),
+            "priority_click_card": setting_priority(settings, "clickCardPriority"),
             "priority_fullscreen_pip": setting_priority(settings, "fullScreenPipPriority"),
             "priority_text_effect": setting_priority(settings, "textEffectPriority"),
             "backing_exclusive_sentence_indices": ",".join(str(value) for value in sorted(backing_exclusive_sentence_indices)),
             "backing_exclusive_sentence_policy": "only_backing_effects_when_xinhuo_or_patent_sentence_ends_with_period",
+            "randomized_fonts": json.dumps(runtime.get("randomized_fonts", {}), ensure_ascii=False),
         }
 
         effect_candidates = []
@@ -5248,6 +5510,8 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
                 effect_candidates.append(title_event)
         effect_candidates.extend(build_backing_image_effect_events(settings, timed_units, duration, title_end))
         effect_candidates.extend(build_pip_effect_events(settings, timed_units, duration, title_end, backing_exclusive_sentence_indices))
+        effect_candidates.extend(build_click_avatar_effect_events(settings, timed_units, duration, title_end, backing_exclusive_sentence_indices))
+        effect_candidates.extend(build_click_card_effect_events(settings, timed_units, duration, title_end, backing_exclusive_sentence_indices))
         effect_candidates.extend(build_full_screen_pip_effect_events(
             settings,
             timed_units,
@@ -5265,6 +5529,8 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             for event in selected_effects
             if event.get("pip")
         ]
+        selected_click_avatar_events = [event for event in selected_pip_events if event.get("visual_kind") == "click_avatar"]
+        selected_click_card_events = [event for event in selected_pip_events if event.get("visual_kind") == "click_card"]
         selected_full_screen_pip_events = []
         for event in selected_effects:
             if not event.get("fullscreen_pip"):
@@ -5323,6 +5589,10 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             "text_effect_sfx": str(text_effect_sfx_file or ""),
             "text_effect_sfx_starts_original": ",".join(f"{start:.3f}" for start in text_effect_sfx_starts),
             "fullscreen_pip_selected_count": len(selected_full_screen_pip_events),
+            "click_avatar_selected_count": len(selected_click_avatar_events),
+            "click_avatar_sources": "|".join(event.get("source", "") for event in selected_click_avatar_events),
+            "click_card_selected_count": len(selected_click_card_events),
+            "click_card_sources": "|".join(event.get("source", "") for event in selected_click_card_events),
             "fullscreen_pip_sources": "|".join(event.get("source", "") for event in selected_full_screen_pip_events),
             "fullscreen_pip_fit_modes": ",".join(event.get("fit_mode", "") for event in selected_full_screen_pip_events),
             "fullscreen_pip_start_modes": ",".join(event.get("start_mode", "") for event in selected_full_screen_pip_events),
@@ -5469,27 +5739,24 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
                     clips=len(rendered_text_effects),
                     output=str(text_effect_packaged),
                 )
+        logo_file = None
         if clip_enabled(settings, "clipLogo", False):
             logo_box = preview_layout_box(settings, "previewLogo", {"x": 90, "y": 88, "w": 180, "h": 180, "min_w": 48, "min_h": 48})
             logo_file, logo_mode = choose_logo_file(settings)
-            overlay_logo_full_video(packaged_for_tighten, logo_file, settings, packaged_with_logo)
-            packaged_for_tighten = packaged_with_logo
             report_extra.update({
                 "logo_mode": logo_mode,
                 "logo_file": str(logo_file),
                 "logo_box": json.dumps(logo_box, ensure_ascii=False),
                 "logo_opacity_percent": str(settings.get("logoOpacityPercent", 100)),
+                "logo_duration_enabled": bool_setting(settings.get("logoDurationEnabled")),
+                "logo_duration_seconds": "" if logo_duration_seconds(settings) is None else f"{logo_duration_seconds(settings):.3f}",
+                "logo_timeline_stage": "final_video",
             })
-            log_json(
-                "logo_applied",
-                index=index,
-                slug=slug,
-                output=str(packaged_with_logo),
-            )
         report_extra["bgm_mode"] = runtime.get("bgm_mode", "")
+        tighten_output = final_without_logo if logo_file else final
         tighten_and_mix_selected_bgm(
             packaged_for_tighten,
-            final,
+            tighten_output,
             report,
             title_end,
             runtime["bgm_file"],
@@ -5500,6 +5767,16 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
             settings=settings,
             report_extra=report_extra,
         )
+        if logo_file:
+            overlay_logo_full_video(tighten_output, logo_file, settings, final)
+            log_json(
+                "logo_applied",
+                index=index,
+                slug=slug,
+                output=str(final),
+                duration_seconds=logo_duration_seconds(settings),
+                timeline_stage="final_video",
+            )
 
         copied = unique_output_path(runtime["output_dir"] / final_output_filename(settings, final.suffix))
         shutil.copy2(final, copied)

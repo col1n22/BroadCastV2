@@ -18,12 +18,16 @@ const fields = [
   'modelBaseUrl',
   'modelApiKey',
   'modelName',
+  'aiMaterialEnabled',
   'sensitiveReplacementRules',
   'fontLibrary',
   'titleFontPath',
   'titleTopFontPath',
   'titleMiddleFontPath',
   'titleBottomFontPath',
+  'randomTitleTopFont',
+  'randomTitleMiddleFont',
+  'randomTitleBottomFont',
   'titleFontSize',
   'titleTopLetterSpacing',
   'titleMiddleLetterSpacing',
@@ -43,6 +47,7 @@ const fields = [
   'titleBgPaddingY',
   'titleBgRadius',
   'captionFontPath',
+  'randomCaptionFont',
   'captionFontSize',
   'textEffectFontPath',
   'textEffectColor',
@@ -63,6 +68,8 @@ const fields = [
   'clipPatent',
   'clipIntro',
   'clipPip',
+  'clipClickAvatar',
+  'clipClickCard',
   'clipFullScreenPip',
   'bgmStartMode',
   'sfxMode',
@@ -92,6 +99,32 @@ const fields = [
   'pipHeight',
   'pipDurationSeconds',
   'pipCloseAtSentenceEnd',
+  'clickAvatarFolder',
+  'clickAvatarMaterialLibrary',
+  'clickAvatarMaterialFile',
+  'useClickAvatarMaterialFile',
+  'clickAvatarKeywords',
+  'clickAvatarRules',
+  'clickAvatarPriority',
+  'clickAvatarX',
+  'clickAvatarY',
+  'clickAvatarWidth',
+  'clickAvatarHeight',
+  'clickAvatarDurationSeconds',
+  'clickAvatarCloseAtSentenceEnd',
+  'clickCardFolder',
+  'clickCardMaterialLibrary',
+  'clickCardMaterialFile',
+  'useClickCardMaterialFile',
+  'clickCardKeywords',
+  'clickCardRules',
+  'clickCardPriority',
+  'clickCardX',
+  'clickCardY',
+  'clickCardWidth',
+  'clickCardHeight',
+  'clickCardDurationSeconds',
+  'clickCardCloseAtSentenceEnd',
   'fullScreenPipFolder',
   'fullScreenPipMaterialLibrary',
   'fullScreenPipMaterialFile',
@@ -135,6 +168,8 @@ const fields = [
   'logoFile',
   'useLogoFile',
   'logoOpacityPercent',
+  'logoDurationEnabled',
+  'logoDurationSeconds',
   'openingHorizontalAspectMode',
   'previewTitleX',
   'previewTitleY',
@@ -156,6 +191,14 @@ const fields = [
   'previewPipY',
   'previewPipW',
   'previewPipH',
+  'previewClickAvatarX',
+  'previewClickAvatarY',
+  'previewClickAvatarW',
+  'previewClickAvatarH',
+  'previewClickCardX',
+  'previewClickCardY',
+  'previewClickCardW',
+  'previewClickCardH',
   'previewLogoX',
   'previewLogoY',
   'previewLogoW',
@@ -196,7 +239,7 @@ let templateManagerFilterAccountIndexes = new Set();
 let previewLayoutFrame = 0;
 
 const requiredClipFields = new Set(['clipTitle', 'clipCaption', 'clipBgm']);
-const optionalClipFields = ['hideCtaCaptions', 'clipTitleMotion', 'clipIntro', 'clipPatent', 'clipPip', 'clipFullScreenPip', 'clipTextEffects', 'clipLogo'];
+const optionalClipFields = ['hideCtaCaptions', 'clipTitleMotion', 'clipIntro', 'clipPatent', 'clipPip', 'clipClickAvatar', 'clipClickCard', 'clipFullScreenPip', 'clipTextEffects', 'clipLogo'];
 const textEffectIds = ['kinetic', 'slide-reveal', 'word-bounce', 'spring-up', 'bubble'];
 const defaultSensitiveReplacementRules = '医=醫\n药=藥\n病=疒\n血=皿\n手术=手S';
 const clipFieldLabels = {
@@ -208,6 +251,8 @@ const clipFieldLabels = {
   clipIntro: '身份背书',
   clipPatent: '专利',
   clipPip: '画中画',
+  clipClickAvatar: '点击头像',
+  clipClickCard: '卡片',
   clipFullScreenPip: '全屏画中画',
   clipTextEffects: '花字',
   clipLogo: 'Logo'
@@ -249,6 +294,9 @@ const templateFields = [
   'titleTopFontPath',
   'titleMiddleFontPath',
   'titleBottomFontPath',
+  'randomTitleTopFont',
+  'randomTitleMiddleFont',
+  'randomTitleBottomFont',
   'titleFontSize',
   'titleTopLetterSpacing',
   'titleMiddleLetterSpacing',
@@ -268,6 +316,7 @@ const templateFields = [
   'titleBgPaddingY',
   'titleBgRadius',
   'captionFontPath',
+  'randomCaptionFont',
   'captionFontSize',
   'textEffectFontPath',
   'textEffectColor',
@@ -297,6 +346,8 @@ const templateFields = [
   'logoFile',
   'useLogoFile',
   'logoOpacityPercent',
+  'logoDurationEnabled',
+  'logoDurationSeconds',
   'previewTitleX',
   'previewTitleY',
   'previewTitleW',
@@ -317,6 +368,14 @@ const templateFields = [
   'previewPipY',
   'previewPipW',
   'previewPipH',
+  'previewClickAvatarX',
+  'previewClickAvatarY',
+  'previewClickAvatarW',
+  'previewClickAvatarH',
+  'previewClickCardX',
+  'previewClickCardY',
+  'previewClickCardW',
+  'previewClickCardH',
   'previewLogoX',
   'previewLogoY',
   'previewLogoW',
@@ -325,6 +384,14 @@ const templateFields = [
   'pipY',
   'pipWidth',
   'pipHeight',
+  'clickAvatarX',
+  'clickAvatarY',
+  'clickAvatarWidth',
+  'clickAvatarHeight',
+  'clickCardX',
+  'clickCardY',
+  'clickCardWidth',
+  'clickCardHeight',
   'previewVisibleObjects'
 ];
 const previewCanvas = { width: 1080, height: 1920 };
@@ -337,6 +404,8 @@ const previewDefaults = {
   caption: { prefix: 'previewCaption', x: 100, y: 1385, w: 880, h: 220, minW: 280, minH: 90 },
   textEffect: { prefix: 'previewTextEffect', x: 100, y: 1385, w: 880, h: 220, minW: 280, minH: 90 },
   pip: { prefix: 'previewPip', x: 156, y: 910, w: 768, h: 432, minW: 142, minH: 80, fixedAspect: pipAspectRatio },
+  clickAvatar: { prefix: 'previewClickAvatar', x: 156, y: 910, w: 768, h: 432, minW: 142, minH: 80, fixedAspect: pipAspectRatio },
+  clickCard: { prefix: 'previewClickCard', x: 156, y: 910, w: 768, h: 432, minW: 142, minH: 80, fixedAspect: pipAspectRatio },
   logo: { prefix: 'previewLogo', x: 90, y: 88, w: 180, h: 180, minW: 48, minH: 48 },
   disclaimer: { prefix: 'previewDisclaimer', x: 90, y: 1735, w: 900, h: 150, minW: 280, minH: 70 }
 };
@@ -345,6 +414,8 @@ const previewObjectLabels = {
   caption: '字幕',
   textEffect: '花字限制',
   pip: '画中画',
+  clickAvatar: '点击头像',
+  clickCard: '卡片',
   logo: 'Logo',
   disclaimer: '底部声明'
 };
@@ -750,6 +821,39 @@ function normalizePipRules(value) {
     .filter((rule) => rule.keywords || rule.videoFolder || rule.videoFile || rule.priority !== '');
 }
 
+const pipRuleConfigs = {
+  pip: {
+    prefix: 'pip',
+    clipField: 'clipPip',
+    mediaKind: 'pipMaterial',
+    optionalWhenEmpty: true,
+    settingKey: 'pipRules',
+    listId: 'pipRuleList',
+    addButtonId: 'btnAddPipRule',
+    label: '画中画'
+  },
+  clickAvatar: {
+    prefix: 'clickAvatar',
+    clipField: 'clipClickAvatar',
+    mediaKind: 'clickAvatarMaterial',
+    optionalWhenEmpty: true,
+    settingKey: 'clickAvatarRules',
+    listId: 'clickAvatarRuleList',
+    addButtonId: 'btnAddClickAvatarRule',
+    label: '点击头像'
+  },
+  clickCard: {
+    prefix: 'clickCard',
+    clipField: 'clipClickCard',
+    mediaKind: 'clickCardMaterial',
+    optionalWhenEmpty: true,
+    settingKey: 'clickCardRules',
+    listId: 'clickCardRuleList',
+    addButtonId: 'btnAddClickCardRule',
+    label: '卡片'
+  }
+};
+
 function normalizeTextEffectKeywordRules(value) {
   const raw = Array.isArray(value) ? value : [];
   return raw
@@ -760,8 +864,11 @@ function normalizeTextEffectKeywordRules(value) {
     .filter((rule) => rule.keywords || rule.priority !== '');
 }
 
-function collectPipRules() {
-  return Array.from(document.querySelectorAll('[data-pip-rule-row]'))
+function collectPipRules(kind = 'pip') {
+  const config = pipRuleConfigs[kind];
+  const list = config ? $(config.listId) : null;
+  if (!config || !list) return normalizePipRules(settings[config?.settingKey]);
+  return Array.from(list.querySelectorAll('[data-pip-rule-row]'))
     .map((row) => ({
       keywords: row.querySelector('[data-pip-rule-keywords]')?.value.trim() || '',
       videoFolder: row.querySelector('[data-pip-rule-folder]')?.value.trim() || '',
@@ -785,12 +892,19 @@ function collectTextEffectKeywordRules() {
     .filter((rule) => rule.keywords || rule.priority !== '');
 }
 
-function renderPipRules(value) {
-  const list = $('pipRuleList');
+function renderPipRules(value, kind = 'pip') {
+  const config = pipRuleConfigs[kind];
+  const list = config ? $(config.listId) : null;
   if (!list) return;
   const rules = normalizePipRules(value);
   list.innerHTML = '';
-  rules.forEach((rule) => addPipRuleRow(rule));
+  rules.forEach((rule) => addPipRuleRow(rule, kind));
+}
+
+function renderAllPipRules() {
+  Object.entries(pipRuleConfigs).forEach(([kind, config]) => {
+    renderPipRules(settings[config.settingKey], kind);
+  });
 }
 
 function renderTextEffectKeywordRules(value) {
@@ -801,12 +915,13 @@ function renderTextEffectKeywordRules(value) {
   rules.forEach((rule) => addTextEffectKeywordRuleRow(rule));
 }
 
-function addPipRuleRow(rule = {}) {
-  const list = $('pipRuleList');
+function addPipRuleRow(rule = {}, kind = 'pip') {
+  const config = pipRuleConfigs[kind];
+  const list = config ? $(config.listId) : null;
   if (!list) return;
   const row = document.createElement('div');
   row.className = 'pip-rule-row';
-  row.dataset.pipRuleRow = '1';
+  row.dataset.pipRuleRow = kind;
   row.innerHTML = `
     <textarea data-pip-rule-keywords rows="2" placeholder="关键词，多个用逗号或换行分隔">${escapeHtml(rule.keywords || '')}</textarea>
     <div class="path-row">
@@ -823,7 +938,7 @@ function addPipRuleRow(rule = {}) {
   priorityRow.className = 'pip-rule-priority';
   priorityRow.innerHTML = `
     <span>特效优先级（0-10，数字越小越优先）</span>
-    <input data-pip-rule-priority type="number" min="0" max="10" step="1" value="${escapeHtml(rule.priority === '' || rule.priority === undefined ? '' : rule.priority)}" placeholder="跟随画中画" />
+    <input data-pip-rule-priority type="number" min="0" max="10" step="1" value="${escapeHtml(rule.priority === '' || rule.priority === undefined ? '' : rule.priority)}" placeholder="跟随${escapeHtml(config.label)}" />
   `;
   row.appendChild(priorityRow);
   const actions = document.createElement('div');
@@ -958,6 +1073,14 @@ function newTemplateDefaultConfig() {
   template.pipY = previewDefaults.pip.y;
   template.pipWidth = previewDefaults.pip.w;
   template.pipHeight = previewDefaults.pip.h;
+  template.clickAvatarX = previewDefaults.clickAvatar.x;
+  template.clickAvatarY = previewDefaults.clickAvatar.y;
+  template.clickAvatarWidth = previewDefaults.clickAvatar.w;
+  template.clickAvatarHeight = previewDefaults.clickAvatar.h;
+  template.clickCardX = previewDefaults.clickCard.x;
+  template.clickCardY = previewDefaults.clickCard.y;
+  template.clickCardWidth = previewDefaults.clickCard.w;
+  template.clickCardHeight = previewDefaults.clickCard.h;
   template.previewVisibleObjects = [...previewObjectKinds];
   return template;
 }
@@ -967,6 +1090,10 @@ function templateConfigFrom(value) {
     ? (value.config && typeof value.config === 'object' ? value.config : value)
     : {};
   const config = captureTemplate(source);
+  if (source.previewClickAvatarX === undefined && source.previewClickCardX === undefined) {
+    const visible = Array.isArray(config.previewVisibleObjects) ? config.previewVisibleObjects : previewObjectKinds;
+    config.previewVisibleObjects = [...new Set([...visible, 'clickAvatar', 'clickCard'])];
+  }
   if (config.textEffectColor === undefined && source.captionColor !== undefined) {
     config.textEffectColor = cloneTemplateValue(source.captionColor);
   }
@@ -1134,7 +1261,7 @@ function normalizeFontLibrary(value) {
   const fonts = [];
   raw.forEach((item) => {
     const fontPath = String(typeof item === 'string' ? item : item?.path || '').trim();
-    if (!fontPath || !/\.(ttf|otf|ttc)$/i.test(fontPath)) return;
+    if (!fontPath || !/\.(ttf|otf|ttc)$/i.test(fontPath) || fileBaseName(fontPath).startsWith('._')) return;
     const key = fontPath.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
@@ -1198,6 +1325,34 @@ const mediaLibraryConfigs = {
     useFixedFieldId: 'usePipMaterialFile',
     label: '画中画素材',
     emptyText: '还没有导入画中画素材',
+    filterName: 'Media',
+    extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'png', 'jpg', 'jpeg', 'webp']
+  },
+  clickAvatarMaterial: {
+    settingKey: 'clickAvatarMaterialLibrary',
+    listId: 'clickAvatarMaterialLibraryList',
+    countId: 'clickAvatarMaterialLibraryCount',
+    importButtonId: 'btnImportClickAvatarMaterialLibrary',
+    importFolderButtonId: 'btnImportClickAvatarMaterialLibraryFolder',
+    selectId: 'clickAvatarMaterialLibrarySelect',
+    fileFieldId: 'clickAvatarMaterialFile',
+    useFixedFieldId: 'useClickAvatarMaterialFile',
+    label: '点击头像素材',
+    emptyText: '还没有导入点击头像素材',
+    filterName: 'Media',
+    extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'png', 'jpg', 'jpeg', 'webp']
+  },
+  clickCardMaterial: {
+    settingKey: 'clickCardMaterialLibrary',
+    listId: 'clickCardMaterialLibraryList',
+    countId: 'clickCardMaterialLibraryCount',
+    importButtonId: 'btnImportClickCardMaterialLibrary',
+    importFolderButtonId: 'btnImportClickCardMaterialLibraryFolder',
+    selectId: 'clickCardMaterialLibrarySelect',
+    fileFieldId: 'clickCardMaterialFile',
+    useFixedFieldId: 'useClickCardMaterialFile',
+    label: '卡片素材',
+    emptyText: '还没有导入卡片素材',
     filterName: 'Media',
     extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'png', 'jpg', 'jpeg', 'webp']
   },
@@ -1382,7 +1537,11 @@ async function importMediaLibraryFolder(kind) {
 function fontLibraryWithCurrentPath(currentPath) {
   const fonts = normalizeFontLibrary(settings.fontLibrary);
   const pathText = String(currentPath || '').trim();
-  if (pathText && !fonts.some((font) => font.path.toLowerCase() === pathText.toLowerCase())) {
+  if (
+    pathText
+    && !fileBaseName(pathText).startsWith('._')
+    && !fonts.some((font) => font.path.toLowerCase() === pathText.toLowerCase())
+  ) {
     fonts.push({ name: `${fileBaseName(pathText)}（当前字体）`, path: pathText });
   }
   return fonts;
@@ -1451,7 +1610,7 @@ function renderFontSelectOptions(targetId = '') {
     select.value = currentPath && fonts.some((font) => font.path === currentPath)
       ? currentPath
       : fonts[0].path;
-    if (source && !source.value && select.value) {
+    if (source && select.value && (!source.value || fileBaseName(source.value).startsWith('._'))) {
       source.value = select.value;
     }
   });
@@ -1625,7 +1784,7 @@ async function importFontsToLibrary() {
 }
 
 function collectSettingsBase() {
-  const next = {};
+  const next = { ...settings };
   for (const field of fields) {
     const el = $(field);
     if (!el) continue;
@@ -1647,6 +1806,14 @@ function stashCurrentTemplate(accountIndex = settings.chanjingAccountIndex, temp
   current.pipY = Number(current.previewPipY || current.pipY || previewDefaults.pip.y);
   current.pipHeight = Number(current.previewPipH || current.pipHeight || previewDefaults.pip.h);
   current.pipWidth = Math.round(current.pipHeight * pipAspectRatio);
+  current.clickAvatarX = Number(current.previewClickAvatarX || current.clickAvatarX || previewDefaults.clickAvatar.x);
+  current.clickAvatarY = Number(current.previewClickAvatarY || current.clickAvatarY || previewDefaults.clickAvatar.y);
+  current.clickAvatarHeight = Number(current.previewClickAvatarH || current.clickAvatarHeight || previewDefaults.clickAvatar.h);
+  current.clickAvatarWidth = Math.round(current.clickAvatarHeight * pipAspectRatio);
+  current.clickCardX = Number(current.previewClickCardX || current.clickCardX || previewDefaults.clickCard.x);
+  current.clickCardY = Number(current.previewClickCardY || current.clickCardY || previewDefaults.clickCard.y);
+  current.clickCardHeight = Number(current.previewClickCardH || current.clickCardHeight || previewDefaults.clickCard.h);
+  current.clickCardWidth = Math.round(current.clickCardHeight * pipAspectRatio);
   const templates = normalizeAccountTemplates(settings.accountTemplates);
   const account = Math.max(1, Number(accountIndex || 1));
   const id = String(templateId || '');
@@ -1667,6 +1834,7 @@ function stashCurrentTemplate(accountIndex = settings.chanjingAccountIndex, temp
 
 function collectSettings() {
   const next = collectSettingsBase();
+  next.aiMaterialEnabled = false;
   normalizeTitleLineFontSettings(next);
   normalizeTitleBackgroundSettings(next);
   next.sensitiveReplacementRules = normalizeSensitiveReplacementRules(collectSensitiveReplacementRulesFromUi());
@@ -1695,16 +1863,28 @@ function collectSettings() {
   next.pipY = Number(next.previewPipY || next.pipY || previewDefaults.pip.y);
   next.pipHeight = Number(next.previewPipH || next.pipHeight || previewDefaults.pip.h);
   next.pipWidth = Math.round(next.pipHeight * pipAspectRatio);
+  next.clickAvatarX = Number(next.previewClickAvatarX || next.clickAvatarX || previewDefaults.clickAvatar.x);
+  next.clickAvatarY = Number(next.previewClickAvatarY || next.clickAvatarY || previewDefaults.clickAvatar.y);
+  next.clickAvatarHeight = Number(next.previewClickAvatarH || next.clickAvatarHeight || previewDefaults.clickAvatar.h);
+  next.clickAvatarWidth = Math.round(next.clickAvatarHeight * pipAspectRatio);
+  next.clickCardX = Number(next.previewClickCardX || next.clickCardX || previewDefaults.clickCard.x);
+  next.clickCardY = Number(next.previewClickCardY || next.clickCardY || previewDefaults.clickCard.y);
+  next.clickCardHeight = Number(next.previewClickCardH || next.clickCardHeight || previewDefaults.clickCard.h);
+  next.clickCardWidth = Math.round(next.clickCardHeight * pipAspectRatio);
   next.textEffectIds = Array.from(document.querySelectorAll('[data-text-effect-id]:checked'))
     .map((el) => el.dataset.textEffectId)
     .filter((id) => textEffectIds.includes(id));
-  next.pipRules = collectPipRules();
+  next.pipRules = collectPipRules('pip');
+  next.clickAvatarRules = collectPipRules('clickAvatar');
+  next.clickCardRules = collectPipRules('clickCard');
   next.textEffectKeywordRules = collectTextEffectKeywordRules();
   next.fontLibrary = collectFontLibraryFromUi();
   next.bgmLibrary = collectMediaLibraryFromUi('bgm');
   next.sfxLibrary = collectMediaLibraryFromUi('sfx');
   next.openingVideoLibrary = collectMediaLibraryFromUi('openingVideo');
   next.pipMaterialLibrary = collectMediaLibraryFromUi('pipMaterial');
+  next.clickAvatarMaterialLibrary = collectMediaLibraryFromUi('clickAvatarMaterial');
+  next.clickCardMaterialLibrary = collectMediaLibraryFromUi('clickCardMaterial');
   next.fullScreenPipMaterialLibrary = collectMediaLibraryFromUi('fullScreenPipMaterial');
   next.previewVisibleObjects = [...previewVisibleKinds];
   next.accountTemplates = next.chanjingAccountIndex && next.currentTemplateId
@@ -1721,6 +1901,7 @@ function collectSettings() {
 
 function fillSettings(value) {
   settings = { ...(value || {}) };
+  settings.aiMaterialEnabled = false;
   settings.chanjingAccounts = normalizeAccounts(settings.chanjingAccounts);
   settings.chanjingAssetOverrides = normalizeAssetOverrides(settings.chanjingAssetOverrides);
   settings.fontLibrary = normalizeFontLibrary(settings.fontLibrary);
@@ -1728,6 +1909,8 @@ function fillSettings(value) {
   settings.sfxLibrary = normalizeMediaLibraryForKind('sfx', settings.sfxLibrary);
   settings.openingVideoLibrary = normalizeMediaLibraryForKind('openingVideo', settings.openingVideoLibrary);
   settings.pipMaterialLibrary = normalizeMediaLibraryForKind('pipMaterial', settings.pipMaterialLibrary);
+  settings.clickAvatarMaterialLibrary = normalizeMediaLibraryForKind('clickAvatarMaterial', settings.clickAvatarMaterialLibrary);
+  settings.clickCardMaterialLibrary = normalizeMediaLibraryForKind('clickCardMaterial', settings.clickCardMaterialLibrary);
   settings.fullScreenPipMaterialLibrary = normalizeMediaLibraryForKind('fullScreenPipMaterial', settings.fullScreenPipMaterialLibrary);
   settings.sensitiveReplacementRules = normalizeSensitiveReplacementRules(settings.sensitiveReplacementRules);
   Object.assign(settings, normalizeSilenceTrimSettings(settings));
@@ -1791,9 +1974,19 @@ function fillSettings(value) {
   settings.previewPipY = settings.previewPipY ?? settings.pipY;
   settings.previewPipH = settings.previewPipH ?? settings.pipHeight;
   settings.previewPipW = Math.round(Number(settings.previewPipH || previewDefaults.pip.h) * pipAspectRatio);
+  settings.previewClickAvatarX = settings.previewClickAvatarX ?? settings.clickAvatarX;
+  settings.previewClickAvatarY = settings.previewClickAvatarY ?? settings.clickAvatarY;
+  settings.previewClickAvatarH = settings.previewClickAvatarH ?? settings.clickAvatarHeight;
+  settings.previewClickAvatarW = Math.round(Number(settings.previewClickAvatarH || previewDefaults.clickAvatar.h) * pipAspectRatio);
+  settings.previewClickCardX = settings.previewClickCardX ?? settings.clickCardX;
+  settings.previewClickCardY = settings.previewClickCardY ?? settings.clickCardY;
+  settings.previewClickCardH = settings.previewClickCardH ?? settings.clickCardHeight;
+  settings.previewClickCardW = Math.round(Number(settings.previewClickCardH || previewDefaults.clickCard.h) * pipAspectRatio);
   settings.pipRules = normalizePipRules(settings.pipRules);
+  settings.clickAvatarRules = normalizePipRules(settings.clickAvatarRules);
+  settings.clickCardRules = normalizePipRules(settings.clickCardRules);
   settings.textEffectKeywordRules = normalizeTextEffectKeywordRules(settings.textEffectKeywordRules);
-  previewVisibleKinds = new Set(previewObjectKinds);
+  previewVisibleKinds = new Set(normalizePreviewVisibleObjects(settings.previewVisibleObjects));
   settings.previewVisibleObjects = [...previewVisibleKinds];
   const selectedTextEffects = Array.isArray(settings.textEffectIds)
     ? settings.textEffectIds.filter((id) => textEffectIds.includes(id))
@@ -1822,10 +2015,11 @@ function fillSettings(value) {
   }
   syncSilenceTrimFields();
   syncVideoSpeedFields();
+  syncLogoDurationFields();
   document.querySelectorAll('[data-text-effect-id]').forEach((el) => {
     el.checked = selectedTextEffects.includes(el.dataset.textEffectId);
   });
-  renderPipRules(settings.pipRules);
+  renderAllPipRules();
   renderTextEffectKeywordRules(settings.textEffectKeywordRules);
   renderSensitiveReplacementRules(settings.sensitiveReplacementRules);
   renderFontLibrary();
@@ -1844,26 +2038,19 @@ function fillSettings(value) {
 }
 
 function syncPipFieldsFromPreview(updatePreview = true) {
-  const box = getPreviewBox('pip');
-  const mapping = {
-    pipX: box.x,
-    pipY: box.y,
-    pipHeight: box.h
-  };
-  for (const [id, value] of Object.entries(mapping)) {
-    const el = $(id);
-    if (el) el.value = String(value);
-  }
-  if (updatePreview) {
-    setPreviewBox('pip', box, false);
-  }
+  ['pip', 'clickAvatar', 'clickCard'].forEach((kind) => {
+    const box = getPreviewBox(kind);
+    updatePipStyleFieldsFromBox(kind, box);
+    if (updatePreview) setPreviewBox(kind, box, false);
+  });
 }
 
-function syncPreviewPipFromStyleFields() {
-  setPreviewBox('pip', {
-    x: Number($('pipX')?.value || previewDefaults.pip.x),
-    y: Number($('pipY')?.value || previewDefaults.pip.y),
-    h: Number($('pipHeight')?.value || previewDefaults.pip.h),
+function syncPreviewPipFromStyleFields(kind = 'pip') {
+  const defaults = previewDefaults[kind];
+  setPreviewBox(kind, {
+    x: Number($(`${kind}X`)?.value || defaults.x),
+    y: Number($(`${kind}Y`)?.value || defaults.y),
+    h: Number($(`${kind}Height`)?.value || defaults.h),
   }, false);
 }
 
@@ -1977,8 +2164,8 @@ function setPreviewBox(kind, box, updateControls = true) {
     if (el) el.value = String(value);
   }
   applyPreviewBox(kind, normalized);
-  if (kind === 'pip') {
-    updatePipStyleFieldsFromBox(normalized);
+  if (['pip', 'clickAvatar', 'clickCard'].includes(kind)) {
+    updatePipStyleFieldsFromBox(kind, normalized);
   }
   if (updateControls && $('previewObject')?.value === kind) {
     fillPreviewCurrentControls(kind);
@@ -2002,6 +2189,11 @@ function syncPreviewStyleControls(targetId = '') {
   });
 }
 
+function syncLogoDurationFields() {
+  const duration = $('logoDurationSeconds');
+  if (duration) duration.disabled = !$('logoDurationEnabled')?.checked;
+}
+
 function applyPreviewStyleProxy(proxy) {
   const target = proxy?.dataset?.previewStyleTarget;
   const source = target ? $(target) : null;
@@ -2018,15 +2210,16 @@ function applyPreviewStyleProxy(proxy) {
   if (target === 'logoFile' || target === 'useLogoFile' || target === 'logoOpacityPercent') {
     updatePreviewLogo();
   }
+  if (target === 'logoDurationEnabled') syncLogoDurationFields();
   applyPreviewTextStyle();
   schedulePreviewLayoutUpdate();
 }
 
-function updatePipStyleFieldsFromBox(box) {
+function updatePipStyleFieldsFromBox(kind, box) {
   const values = {
-    pipX: box.x,
-    pipY: box.y,
-    pipHeight: box.h,
+    [`${kind}X`]: box.x,
+    [`${kind}Y`]: box.y,
+    [`${kind}Height`]: box.h,
   };
   for (const [id, value] of Object.entries(values)) {
     const el = $(id);
@@ -5192,29 +5385,38 @@ function validateBeforeRun() {
       throw new Error('请先填写：开头视频文件夹');
     }
   }
-  if (current.clipPip) {
-    const pipRows = normalizePipRules(current.pipRules);
-    const pipRuleSourceReady = (rule) => rule.useVideoFile ? Boolean(rule.videoFile) : Boolean(rule.videoFolder);
-    const hasPartialPipRow = pipRows.some((rule) => !rule.keywords || !pipRuleSourceReady(rule));
-    const hasCompletePipRow = pipRows.some((rule) => rule.keywords && pipRuleSourceReady(rule));
-    if (hasPartialPipRow) {
-      throw new Error('自定义画中画每一行都要填写关键词，并按“使用指定”状态填写素材文件或素材文件夹');
+  Object.values(pipRuleConfigs).forEach((config) => {
+    if (!current[config.clipField]) return;
+    const rows = normalizePipRules(current[config.settingKey]);
+    const ruleSourceReady = (rule) => rule.useVideoFile ? Boolean(rule.videoFile) : Boolean(rule.videoFolder);
+    const hasPartialRow = rows.some((rule) => !rule.keywords || !ruleSourceReady(rule));
+    const hasCompleteRow = rows.some((rule) => rule.keywords && ruleSourceReady(rule));
+    const useFixedKey = `use${config.prefix[0].toUpperCase()}${config.prefix.slice(1)}MaterialFile`;
+    const materialFileKey = `${config.prefix}MaterialFile`;
+    const folderKey = `${config.prefix}Folder`;
+    const libraryKey = `${config.prefix}MaterialLibrary`;
+    const keywordsKey = `${config.prefix}Keywords`;
+    const libraryItems = normalizeMediaLibrary(current[libraryKey], mediaLibraryConfigs[config.mediaKind].extensions);
+    if (hasPartialRow) {
+      throw new Error(`自定义${config.label}每一行都要填写关键词，并按“使用指定”状态填写素材文件或素材文件夹`);
     }
-    if (current.usePipMaterialFile && !current.pipMaterialFile) {
-      throw new Error('请先选择：指定画中画素材文件');
+    if (current[useFixedKey] && !current[materialFileKey]) {
+      if (config.optionalWhenEmpty) return;
+      throw new Error(`请先选择：指定${config.label}素材文件`);
     }
     if (
-      !hasCompletePipRow
-      && !current.usePipMaterialFile
-      && !current.pipFolder
-      && !normalizeMediaLibrary(current.pipMaterialLibrary, mediaLibraryConfigs.pipMaterial.extensions).length
+      !hasCompleteRow
+      && !current[useFixedKey]
+      && !current[folderKey]
+      && !libraryItems.length
     ) {
-      throw new Error('请先填写：画中画文件夹');
+      if (config.optionalWhenEmpty) return;
+      throw new Error(`请先填写：${config.label}素材文件夹`);
     }
-    if (!hasCompletePipRow && !String(current.pipKeywords || '').trim()) {
-      throw new Error('请先填写：画中画触发关键词');
+    if (!hasCompleteRow && !String(current[keywordsKey] || '').trim()) {
+      throw new Error(`请先填写：${config.label}触发关键词`);
     }
-  }
+  });
   if (current.clipFullScreenPip) {
     if (current.useFullScreenPipMaterialFile && !current.fullScreenPipMaterialFile) {
       throw new Error('请先选择：指定全屏画中画素材文件');
@@ -5238,6 +5440,9 @@ function validateBeforeRun() {
   }
   if (current.clipLogo && !current.useLogoFile && !current.logoFolder) {
     throw new Error('请先填写：Logo 文件夹');
+  }
+  if (current.clipLogo && current.logoDurationEnabled && Number(current.logoDurationSeconds || 0) < 0.5) {
+    throw new Error('Logo 展示时长不能小于 0.5 秒');
   }
   if (current.clipTextEffects && current.useSfxFile && !current.sfxFile) {
     throw new Error('请先选择：指定音效文件');
@@ -5480,7 +5685,9 @@ async function init() {
     setClipConfigOpen(false);
     setPreviewVisibilityOpen(false);
   });
-  $('btnAddPipRule')?.addEventListener('click', () => addPipRuleRow());
+  Object.entries(pipRuleConfigs).forEach(([kind, config]) => {
+    $(config.addButtonId)?.addEventListener('click', () => addPipRuleRow({}, kind));
+  });
   $('btnAddTextEffectKeywordRule')?.addEventListener('click', () => addTextEffectKeywordRuleRow());
   $('btnImportFonts')?.addEventListener('click', importFontsToLibrary);
   $('fontLibraryList')?.addEventListener('click', (event) => {
@@ -5526,32 +5733,34 @@ async function init() {
       renderMediaLibrarySelect(kind);
     });
   });
-  $('pipRuleList')?.addEventListener('click', async (event) => {
-    const removeButton = event.target.closest('[data-pip-rule-remove]');
-    if (removeButton) {
-      removeButton.closest('[data-pip-rule-row]')?.remove();
-      return;
-    }
-    const pickFolderButton = event.target.closest('[data-pip-rule-pick-folder]');
-    if (pickFolderButton) {
-      const selected = await window.huApp.chooseDirectory();
+  Object.values(pipRuleConfigs).forEach((config) => {
+    $(config.listId)?.addEventListener('click', async (event) => {
+      const removeButton = event.target.closest('[data-pip-rule-remove]');
+      if (removeButton) {
+        removeButton.closest('[data-pip-rule-row]')?.remove();
+        return;
+      }
+      const pickFolderButton = event.target.closest('[data-pip-rule-pick-folder]');
+      if (pickFolderButton) {
+        const selected = await window.huApp.chooseDirectory();
+        if (!selected) return;
+        const row = pickFolderButton.closest('[data-pip-rule-row]');
+        const input = row?.querySelector('[data-pip-rule-folder]');
+        if (input) input.value = selected;
+        return;
+      }
+      const pickButton = event.target.closest('[data-pip-rule-pick]');
+      if (!pickButton) return;
+      const selected = await window.huApp.chooseFile({
+        filters: [{ name: 'Media', extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'png', 'jpg', 'jpeg', 'webp'] }]
+      });
       if (!selected) return;
-      const row = pickFolderButton.closest('[data-pip-rule-row]');
-      const input = row?.querySelector('[data-pip-rule-folder]');
+      const row = pickButton.closest('[data-pip-rule-row]');
+      const input = row?.querySelector('[data-pip-rule-video]');
       if (input) input.value = selected;
-      return;
-    }
-    const pickButton = event.target.closest('[data-pip-rule-pick]');
-    if (!pickButton) return;
-    const selected = await window.huApp.chooseFile({
-      filters: [{ name: 'Media', extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'png', 'jpg', 'jpeg', 'webp'] }]
+      const useSpecified = row?.querySelector('[data-pip-rule-use-video]');
+      if (useSpecified) useSpecified.checked = true;
     });
-    if (!selected) return;
-    const row = pickButton.closest('[data-pip-rule-row]');
-    const input = row?.querySelector('[data-pip-rule-video]');
-    if (input) input.value = selected;
-    const useSpecified = row?.querySelector('[data-pip-rule-use-video]');
-    if (useSpecified) useSpecified.checked = true;
   });
   $('textEffectKeywordRuleList')?.addEventListener('click', (event) => {
     const removeButton = event.target.closest('[data-text-effect-keyword-rule-remove]');
@@ -5578,12 +5787,12 @@ async function init() {
     if (offset) offset.value = '0';
     updateSelectedPreviewBoxFromControls();
   });
-  ['pipX', 'pipY', 'pipHeight'].forEach((id) => {
-    $(id)?.addEventListener('input', () => {
-      syncPreviewPipFromStyleFields();
-      if ($('previewObject')?.value === 'pip') {
-        fillPreviewCurrentControls('pip');
-      }
+  ['pip', 'clickAvatar', 'clickCard'].forEach((kind) => {
+    [`${kind}X`, `${kind}Y`, `${kind}Height`].forEach((id) => {
+      $(id)?.addEventListener('input', () => {
+        syncPreviewPipFromStyleFields(kind);
+        if ($('previewObject')?.value === kind) fillPreviewCurrentControls(kind);
+      });
     });
   });
   $('btnManageAccounts')?.addEventListener('click', openAccountManager);
@@ -5848,7 +6057,9 @@ async function init() {
   document.querySelectorAll('[data-pick-media]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const targetField = btn.dataset.pickMedia;
-      const libraryConfig = Object.values(mediaLibraryConfigs).find((config) => config.fileFieldId === targetField);
+      const libraryEntry = Object.entries(mediaLibraryConfigs).find(([_kind, config]) => config.fileFieldId === targetField);
+      const libraryKind = libraryEntry?.[0];
+      const libraryConfig = libraryEntry?.[1];
       const selected = await window.huApp.chooseFile({
         filters: [
           {
@@ -5859,13 +6070,12 @@ async function init() {
       });
       if (selected) {
         $(targetField).value = selected;
-        if (targetField === 'pipMaterialFile') {
-          if ($('usePipMaterialFile')) $('usePipMaterialFile').checked = true;
-          renderMediaLibrarySelect('pipMaterial');
+        if (libraryConfig?.useFixedFieldId) {
+          const fixedToggle = $(libraryConfig.useFixedFieldId);
+          if (fixedToggle) fixedToggle.checked = true;
         }
-        if (targetField === 'fullScreenPipMaterialFile') {
-          if ($('useFullScreenPipMaterialFile')) $('useFullScreenPipMaterialFile').checked = true;
-          renderMediaLibrarySelect('fullScreenPipMaterial');
+        if (libraryKind) {
+          renderMediaLibrarySelect(libraryKind);
         }
       }
     });
