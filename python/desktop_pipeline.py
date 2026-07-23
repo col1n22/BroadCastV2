@@ -4778,6 +4778,87 @@ def raw_path_for_task(task_id, slug):
     return batch.GENERATED_DIR / f"{task_id}_{slug}_raw.mp4"
 
 
+def auto_cleanup_video_cache_enabled(settings):
+    value = (settings or {}).get("autoCleanupVideoCache")
+    return True if value is None else bool_setting(value)
+
+
+def path_is_within(path, parent):
+    try:
+        Path(path).resolve().relative_to(Path(parent).resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def path_total_size(path):
+    path = Path(path)
+    if path.is_file():
+        try:
+            return path.stat().st_size, 1
+        except OSError:
+            return 0, 0
+    if not path.is_dir():
+        return 0, 0
+    total = 0
+    files = 0
+    for item in path.rglob("*"):
+        if not item.is_file():
+            continue
+        try:
+            total += item.stat().st_size
+            files += 1
+        except OSError:
+            continue
+    return total, files
+
+
+def cleanup_completed_item_video_cache(settings, bundle, raw_video, output_dir, prefix):
+    result = {"enabled": auto_cleanup_video_cache_enabled(settings), "bytes": 0, "files": 0}
+    if not result["enabled"]:
+        return result
+
+    bundle = Path(bundle).resolve()
+    generated_root = (bundle / "work" / "generated").resolve()
+    outputs_root = (bundle / "outputs").resolve()
+    output_dir = Path(output_dir).resolve()
+    if not path_is_within(output_dir, outputs_root):
+        raise RuntimeError(f"中间文件目录超出素材包 outputs，已停止自动清理：{output_dir}")
+
+    targets = []
+    raw_video = Path(raw_video).resolve()
+    if (
+        path_is_within(raw_video, generated_root)
+        and raw_video.parent == generated_root
+        and raw_video.name.endswith("_raw.mp4")
+    ):
+        targets.append(raw_video)
+    targets.extend(output_dir.glob(f"{prefix}*"))
+
+    seen = set()
+    for target in targets:
+        target = Path(target)
+        key = str(target.resolve()).lower()
+        if key in seen or not target.exists():
+            continue
+        seen.add(key)
+        if target.is_dir():
+            if not path_is_within(target, output_dir) or target.parent.resolve() != output_dir:
+                continue
+            size, files = path_total_size(target)
+            shutil.rmtree(target)
+        elif target.suffix.lower() in VIDEO_EXTS:
+            if target != raw_video and target.parent.resolve() != output_dir:
+                continue
+            size, files = path_total_size(target)
+            target.unlink()
+        else:
+            continue
+        result["bytes"] += size
+        result["files"] += files
+    return result
+
+
 def selected_chanjing_asset(settings, assets):
     raw_index = settings.get("chanjingAssetIndex")
     try:
@@ -5786,6 +5867,31 @@ def process_item(item, index, assets, state_path, state, settings, runtime, job)
         entry["processed_at"] = int(completed_at)
         entry.pop("failed_at", None)
         entry.pop("error", None)
+        try:
+            cleanup_result = cleanup_completed_item_video_cache(
+                settings,
+                runtime["bundle"],
+                raw_video,
+                output_dir,
+                prefix,
+            )
+            entry["cache_cleanup"] = cleanup_result
+            if cleanup_result.get("enabled"):
+                log_json(
+                    "item_video_cache_cleaned",
+                    index=index,
+                    slug=slug,
+                    bytes=cleanup_result.get("bytes", 0),
+                    files=cleanup_result.get("files", 0),
+                )
+        except Exception as cleanup_error:
+            entry["cache_cleanup"] = {"enabled": True, "error": str(cleanup_error)}
+            log_json(
+                "item_video_cache_cleanup_failed",
+                index=index,
+                slug=slug,
+                error=str(cleanup_error),
+            )
         save_state(state_path, state)
         log_json(
             "item_done",

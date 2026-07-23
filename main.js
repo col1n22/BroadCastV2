@@ -295,6 +295,7 @@ function defaultSettings() {
     previewClickCardW: 768,
     previewClickCardH: 432,
     previewVisibleObjects: ['title', 'caption', 'textEffect', 'pip', 'clickAvatar', 'clickCard', 'logo', 'disclaimer'],
+    autoCleanupVideoCache: true,
     maxItems: 0,
     pollIntervalSeconds: 20,
     timeoutMinutes: 45
@@ -1125,6 +1126,116 @@ ipcMain.handle('path:open', async (_event, targetPath) => {
   if (!targetPath) return false;
   await shell.openPath(targetPath);
   return true;
+});
+
+function pathInside(candidate, parent) {
+  const relative = path.relative(path.resolve(parent), path.resolve(candidate));
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function cacheLocations(requestSettings = {}) {
+  const current = { ...loadSettings(), ...(requestSettings || {}) };
+  const bundlePath = path.resolve(String(current.bundlePath || bundledBundlePath()));
+  const pipelineFile = path.join(bundlePath, 'pipeline', 'batch_hu_teacher_videos.py');
+  if (!fs.existsSync(pipelineFile)) {
+    throw new Error(`素材包目录不正确，无法定位安全缓存目录：${bundlePath}`);
+  }
+  const generatedPath = path.resolve(bundlePath, 'work', 'generated');
+  const outputsPath = path.resolve(bundlePath, 'outputs');
+  for (const target of [generatedPath, outputsPath]) {
+    if (!pathInside(target, bundlePath) || target === bundlePath) {
+      throw new Error(`缓存目录超出素材包范围，已停止：${target}`);
+    }
+  }
+  const outputDir = String(current.outputDir || '').trim();
+  const resolvedOutputDir = outputDir ? path.resolve(outputDir) : '';
+  const outputInsideCache = Boolean(
+    resolvedOutputDir
+    && [generatedPath, outputsPath].some((target) => pathInside(resolvedOutputDir, target))
+  );
+  return {
+    bundlePath,
+    generatedPath,
+    outputsPath,
+    outputDir: resolvedOutputDir,
+    outputInsideCache
+  };
+}
+
+async function directoryStats(rootPath) {
+  if (!fs.existsSync(rootPath)) return { bytes: 0, files: 0 };
+  let bytes = 0;
+  let files = 0;
+  const pending = [rootPath];
+  while (pending.length) {
+    const current = pending.pop();
+    let entries = [];
+    try {
+      entries = await fs.promises.readdir(current, { withFileTypes: true });
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue;
+      throw error;
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory() && !entry.isSymbolicLink()) {
+        pending.push(entryPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      try {
+        const stat = await fs.promises.stat(entryPath);
+        bytes += stat.size;
+        files += 1;
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
+    }
+  }
+  return { bytes, files };
+}
+
+async function videoCacheStats(requestSettings = {}) {
+  const locations = cacheLocations(requestSettings);
+  const [generated, outputs] = await Promise.all([
+    directoryStats(locations.generatedPath),
+    directoryStats(locations.outputsPath)
+  ]);
+  return {
+    ...locations,
+    bytes: generated.bytes + outputs.bytes,
+    files: generated.files + outputs.files,
+    generated,
+    outputs
+  };
+}
+
+async function clearDirectoryContents(rootPath) {
+  await fs.promises.mkdir(rootPath, { recursive: true });
+  const entries = await fs.promises.readdir(rootPath, { withFileTypes: true });
+  for (const entry of entries) {
+    await fs.promises.rm(path.join(rootPath, entry.name), { recursive: true, force: true });
+  }
+}
+
+ipcMain.handle('cache:stats', (_event, requestSettings = {}) => videoCacheStats(requestSettings));
+
+ipcMain.handle('cache:clear', async (_event, requestSettings = {}) => {
+  if (activeRun) {
+    throw new Error('任务正在运行，不能清理视频缓存');
+  }
+  const before = await videoCacheStats(requestSettings);
+  if (before.outputInsideCache) {
+    throw new Error(`最终输出目录位于视频缓存目录内，请先修改输出目录：${before.outputDir}`);
+  }
+  await clearDirectoryContents(before.generatedPath);
+  await clearDirectoryContents(before.outputsPath);
+  const after = await videoCacheStats(requestSettings);
+  return {
+    ...after,
+    freedBytes: Math.max(0, before.bytes - after.bytes),
+    removedFiles: Math.max(0, before.files - after.files)
+  };
 });
 
 function runtimePythonPath(settings = {}) {

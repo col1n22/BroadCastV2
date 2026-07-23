@@ -647,6 +647,17 @@
               <p class="hint">最多处理条数填 0 表示处理 JSON 里的全部 items。</p>
             </div>
 
+            <div class="settings-card cache-settings-card">
+              <h3>视频缓存</h3>
+              <label class="inline-check standalone"><input id="autoCleanupVideoCache" type="checkbox" /><span>成片成功后自动清理该条视频缓存</span></label>
+              <p id="videoCacheSummary" class="cache-summary">正在计算缓存大小...</p>
+              <p id="videoCacheDetail" class="hint"></p>
+              <div class="settings-export-actions">
+                <button id="btnRefreshVideoCache" class="button secondary" type="button">刷新</button>
+                <button id="btnClearVideoCache" class="button danger" type="button" disabled>清理视频缓存</button>
+              </div>
+            </div>
+
             <div class="settings-card settings-export-card">
               <h3>配置备份</h3>
               <p class="hint">导出会包含账号、模板、模板布局、风格路径、API 配置和所有参数。</p>

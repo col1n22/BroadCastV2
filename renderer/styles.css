@@ -589,6 +589,17 @@ textarea {
   max-height: 180px;
 }
 
+.cache-settings-card .inline-check {
+  align-items: flex-start;
+}
+
+.cache-summary {
+  margin: 14px 0 4px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 800;
+}
+
 .pip-rule-row,
 .text-effect-keyword-rule-row {
   display: grid;

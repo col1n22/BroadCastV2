@@ -203,6 +203,7 @@ const fields = [
   'previewLogoY',
   'previewLogoW',
   'previewLogoH',
+  'autoCleanupVideoCache',
   'maxItems',
   'pollIntervalSeconds',
   'timeoutMinutes'
@@ -237,6 +238,7 @@ let templateManagerDraftConfigs = new Map();
 let templateManagerDraftAccounts = [];
 let templateManagerFilterAccountIndexes = new Set();
 let previewLayoutFrame = 0;
+let currentVideoCacheStats = null;
 
 const requiredClipFields = new Set(['clipTitle', 'clipCaption', 'clipBgm']);
 const optionalClipFields = ['hideCtaCaptions', 'clipTitleMotion', 'clipIntro', 'clipPatent', 'clipPip', 'clipClickAvatar', 'clipClickCard', 'clipFullScreenPip', 'clipTextEffects', 'clipLogo'];
@@ -4659,7 +4661,91 @@ async function saveSettings() {
   await refreshChanjingAssets();
   refreshPreviewBackground();
   updatePreviewSetupState();
+  refreshVideoCacheStats();
   appendLog('[设置] 已保存\n');
+}
+
+function formatFileSize(bytes) {
+  const value = Math.max(0, Number(bytes || 0));
+  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(value >= 10 * 1024 ** 3 ? 1 : 2)} GB`;
+  if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(value >= 10 * 1024 ** 2 ? 1 : 2)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${Math.round(value)} B`;
+}
+
+function videoCacheRequestSettings() {
+  return {
+    bundlePath: $('bundlePath')?.value.trim() || settings.bundlePath || '',
+    outputDir: $('outputDir')?.value.trim() || settings.outputDir || ''
+  };
+}
+
+function renderVideoCacheStats(stats, error = '') {
+  const summary = $('videoCacheSummary');
+  const detail = $('videoCacheDetail');
+  const clearButton = $('btnClearVideoCache');
+  currentVideoCacheStats = stats || null;
+  if (error) {
+    if (summary) summary.textContent = '缓存大小读取失败';
+    if (detail) detail.textContent = error;
+    if (clearButton) clearButton.disabled = true;
+    return;
+  }
+  if (!stats) {
+    if (summary) summary.textContent = '正在计算缓存大小...';
+    if (detail) detail.textContent = '';
+    if (clearButton) clearButton.disabled = true;
+    return;
+  }
+  if (summary) summary.textContent = `当前缓存 ${formatFileSize(stats.bytes)}，共 ${Number(stats.files || 0)} 个文件`;
+  if (detail) {
+    detail.textContent = stats.outputInsideCache
+      ? '最终输出目录位于缓存目录中，请先修改输出目录后再清理。'
+      : `原始视频 ${formatFileSize(stats.generated?.bytes)}，处理中间文件 ${formatFileSize(stats.outputs?.bytes)}`;
+  }
+  if (clearButton) clearButton.disabled = running || Boolean(stats.outputInsideCache) || Number(stats.bytes || 0) <= 0;
+}
+
+async function refreshVideoCacheStats() {
+  renderVideoCacheStats(null);
+  try {
+    const stats = await window.huApp.getVideoCacheStats(videoCacheRequestSettings());
+    renderVideoCacheStats(stats);
+  } catch (error) {
+    renderVideoCacheStats(null, error.message || String(error));
+  }
+}
+
+async function clearVideoCache() {
+  if (running) {
+    appendLog('[缓存] 任务运行中，不能清理视频缓存\n', true);
+    return;
+  }
+  const button = $('btnClearVideoCache');
+  try {
+    const stats = await window.huApp.getVideoCacheStats(videoCacheRequestSettings());
+    if (!Number(stats.bytes || 0)) {
+      renderVideoCacheStats(stats);
+      return;
+    }
+    const confirmed = window.confirm(
+      `将删除 ${formatFileSize(stats.bytes)} 视频缓存，包括蝉镜原始视频和处理中间文件。\n\n`
+      + '模板、配置、素材库、密钥和最终输出目录不会删除。重新处理旧任务时可能需要重新下载原始视频。\n\n确认继续吗？'
+    );
+    if (!confirmed) return;
+    if (button) {
+      button.disabled = true;
+      button.textContent = '正在清理...';
+    }
+    const result = await window.huApp.clearVideoCache(videoCacheRequestSettings());
+    renderVideoCacheStats(result);
+    appendLog(`[缓存] 已清理 ${formatFileSize(result.freedBytes)}，删除 ${result.removedFiles || 0} 个文件\n`);
+  } catch (error) {
+    appendLog(`[缓存清理失败] ${error.message}\n`, true);
+    await refreshVideoCacheStats();
+  } finally {
+    if (button) button.textContent = '清理视频缓存';
+  }
 }
 
 async function applyCurrentTemplateLayout(scope = 'account') {
@@ -5559,6 +5645,7 @@ async function startNextQueueBatch() {
   item.exitCode = null;
   item.error = '';
   running = true;
+  renderVideoCacheStats(currentVideoCacheStats);
   stdoutBuffer = '';
   stdoutTail = '';
   stderrTail = '';
@@ -5643,6 +5730,7 @@ async function init() {
   refreshPreviewBackground();
   updatePreviewSetupState();
   renderQueue();
+  refreshVideoCacheStats();
 
   document.querySelectorAll('.nav-item').forEach((btn) => {
     btn.addEventListener('click', () => switchSection(btn.dataset.section));
@@ -6129,6 +6217,9 @@ async function init() {
   $('btnSaveSettings').addEventListener('click', saveSettings);
   $('btnExportSettings')?.addEventListener('click', exportSettingsConfig);
   $('btnImportSettings')?.addEventListener('click', importSettingsConfig);
+  $('btnRefreshVideoCache')?.addEventListener('click', refreshVideoCacheStats);
+  $('btnClearVideoCache')?.addEventListener('click', clearVideoCache);
+  $('bundlePath')?.addEventListener('change', refreshVideoCacheStats);
   $('btnSaveStyleSettings').addEventListener('click', saveSettings);
   $('btnRun').addEventListener('click', startRun);
   $('btnCancel').addEventListener('click', cancelRun);
@@ -6300,6 +6391,7 @@ async function init() {
       } else if (runQueue.some((item) => item.status === 'pending')) {
         setTimeout(startNextQueueBatch, 0);
       }
+      refreshVideoCacheStats();
     } else {
       renderQueue();
     }

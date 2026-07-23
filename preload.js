@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('huApp', {
   listChanjingAssets: (settings) => ipcRenderer.invoke('chanjing:assets', settings),
   getPreviewBackground: (payload) => ipcRenderer.invoke('preview:background', payload),
   openPath: (targetPath) => ipcRenderer.invoke('path:open', targetPath),
+  getVideoCacheStats: (settings) => ipcRenderer.invoke('cache:stats', settings),
+  clearVideoCache: (settings) => ipcRenderer.invoke('cache:clear', settings),
   startRun: (payload) => ipcRenderer.invoke('run:start', payload),
   updateTitleOverrides: (titleOverrides) => ipcRenderer.invoke('run:updateTitleOverrides', titleOverrides),
   updateContentOverrides: (contentOverrides) => ipcRenderer.invoke('run:updateContentOverrides', contentOverrides),
